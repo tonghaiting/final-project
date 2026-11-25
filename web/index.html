@@ -47,6 +47,8 @@
   .chip.on { border-color:var(--acc); color:#cdeeff; background:#16344a; }
   .err { background:#3a1d22; border:1px solid #6d2b34; padding:8px 11px; border-radius:5px;
          font-size:12.5px; margin-top:8px; }
+  .note { background:#123340; border:1px solid #2c6f8c; padding:8px 11px; border-radius:5px;
+         font-size:12.5px; margin-top:8px; }
   .tip { position:absolute; left:10px; bottom:10px; background:rgba(11,16,32,.72);
          border:1px solid var(--line); border-radius:5px; padding:4px 9px; font-size:11.5px; color:var(--dim); }
   .cmd { width:100%; height:58px; resize:vertical; font-family:ui-monospace,Consolas,monospace;
@@ -116,6 +118,24 @@
         <label>倾角 <span class="v" id="lvAngle"></span></label>
         <input type="range" id="angle" min="-60" max="60" step="1" value="20">
       </div>
+      <div class="row" style="margin-top:8px">
+        <button id="importBtn" style="flex:2 1 0">导入模型 / 轮廓图</button>
+        <input type="file" id="modelfile" accept=".stl,.obj,.png,.jpg,.jpeg,.webp" hidden>
+      </div>
+      <div id="modelOpts" style="display:none">
+        <div id="axisOnly">
+          <label>3D 投影轴（流体看到的是沿该轴的剪影）</label>
+          <select id="axis">
+            <option value="z" selected>Z · 俯视 xy</option>
+            <option value="y">Y · 侧视 xz</option>
+            <option value="x">X · 侧视 yz</option>
+          </select>
+        </div>
+        <label id="invertOnly" style="display:none;margin-top:6px">
+          <input type="checkbox" id="invert"> 图片反相（浅色物体 / 深色背景）</label>
+      </div>
+      <div class="hint" style="margin-top:6px">支持二进制/ASCII STL、OBJ、PNG/JPG/WebP 轮廓图。
+        导入后可拖动、滚轮缩放。图片默认把透明区或暗部当物体。</div>
     </div>
 
     <div class="card">
@@ -186,12 +206,14 @@
       </div>
       <div class="hint" style="margin-top:6px">Python 版一次只支持一个物体，这里导出的是当前选中（或第一个）障碍物；
         网格、dt、Re 保持一致数值才可比。JS 用 Gauss-Seidel、Python 用 masked-Jacobi，
-        St 会差几个百分点。</div>
+        St 会差几个百分点。导入模型时命令里的文件名是占位符，要换成你本机文件的实际路径；
+        自定义模型也不会写进"复制链接"。</div>
     </div>
   </aside>
 </main>
 
 <script src="fluid-sim.js"></script>
+<script src="model-import.js"></script>
 <script>
 (function () {
   'use strict';
@@ -208,7 +230,8 @@
     grid: 'mid', re: 300, uInf: 1, dt: 1, iters: 40, vcg: 0.08,
     view: 'omega', tracers: 160, trail: 55, spf: 1, running: true,
     shapes: [{ shape: 'circle', fx: 0.18, fy: 0.5, fs: 0.0625, ratio: 1, angle: 0 }],
-    sel: 0, newShape: 'circle'
+    sel: 0, newShape: 'circle',
+    model: null, modelSel: false
   };
 
   // ------------------------------------------------------------------ 色标
@@ -260,7 +283,56 @@
   function charD() {
     var m = 0;
     for (var i = 0; i < P.shapes.length; i++) m = Math.max(m, P.shapes[i].fs * NX);
+    if (P.model) m = Math.max(m, P.model.fs * NX);
     return Math.max(4, 2 * m);
+  }
+
+  /* 导入模型的包围盒（单位：格）。fs 是"最长边的一半"占 NX 的比例，
+     与解析形状的 size 语义一致，所以 D = 2*fs*NX。 */
+  function modelBox(nx, ny) {
+    var m = P.model, ar = m.w / m.h;
+    var half = m.fs * nx;
+    var w = ar >= 1 ? 2 * half : 2 * half * ar;
+    var h = ar >= 1 ? 2 * half / ar : 2 * half;
+    var cx = m.fx * nx, cy = m.fy * ny;
+    return { cx: cx, cy: cy, w: w, h: h, x0: cx - w / 2, y0: cy - h / 2 };
+  }
+
+  var mcv = null, mctx = null;
+  /* 把轮廓画布缩到 nx×ny 再按 alpha>127 二值化。getImageData 的行 0 是画布顶，
+     网格 j 从下往上，所以读回时要翻一次行。 */
+  function modelCells(nx, ny) {
+    if (!P.model) return null;
+    if (!mcv || mcv.width !== nx || mcv.height !== ny) {
+      mcv = document.createElement('canvas');
+      mcv.width = nx; mcv.height = ny;
+      mctx = mcv.getContext('2d', { willReadFrequently: true });
+    }
+    var b = modelBox(nx, ny);
+    mctx.setTransform(1, 0, 0, 1, 0, 0);
+    mctx.clearRect(0, 0, nx, ny);
+    mctx.setTransform(1, 0, 0, -1, 0, ny);
+    mctx.imageSmoothingEnabled = true;
+    mctx.drawImage(P.model.light, b.x0, b.y0, b.w, b.h);
+    mctx.setTransform(1, 0, 0, 1, 0, 0);
+    var d = mctx.getImageData(0, 0, nx, ny).data;
+    var m = new Uint8Array(nx * ny);
+    for (var r = 0; r < ny; r++) {
+      var row = (ny - 1 - r) * nx;
+      for (var i = 0; i < nx; i++) if (d[(r * nx + i) * 4 + 3] > 127) m[row + i] = 1;
+    }
+    return m;
+  }
+
+  function tint(src, color) {
+    var c = document.createElement('canvas');
+    c.width = src.width; c.height = src.height;
+    var g = c.getContext('2d');
+    g.drawImage(src, 0, 0);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = color;
+    g.fillRect(0, 0, c.width, c.height);
+    return c;
   }
 
   // ------------------------------------------------------------------ 建场
@@ -272,7 +344,7 @@
     cv.width = W; cv.height = H;
     if (!P.iters) P.iters = g.iters;
     f = new FS.Fluid({ nx: NX, ny: NY, dt: P.dt, uInf: P.uInf, iters: P.iters, vcg: P.vcg,
-                       D: charD(), re: P.re, shapes: cs() });
+                       D: charD(), re: P.re, shapes: cs(), extra: modelCells(NX, NY) });
     tr = new FS.Tracers(f, P.tracers, TRAIL_PTS);
     off = document.createElement('canvas');
     off.width = NX; off.height = NY;
@@ -288,12 +360,18 @@
     if (!f) return;
     f.dt = P.dt; f.uInf = P.uInf; f.iters = P.iters; f.eps = P.vcg;
     f.nu = P.uInf * charD() / Math.max(1, P.re);
-    f.setShapes(cs());
+    f.setShapes(cs(), modelCells(NX, NY));
   }
 
   function updateProbe() {
     var a = cs();
-    if (!a.length) { probeRow = Math.round(NY / 2); probeCol = Math.round(NX * 0.6); return; }
+    probeRow = Math.round(NY / 2); probeCol = Math.round(NX * 0.6);
+    if (P.model) {
+      probeRow = Math.max(1, Math.min(NY - 2, Math.round(P.model.fy * NY)));
+      probeCol = Math.max(1, Math.min(NX - 2, Math.round((P.model.fx + 8 * P.model.fs) * NX)));
+      return;
+    }
+    if (!a.length) return;
     var big = a[0];
     for (var i = 1; i < a.length; i++) if (a[i].size > big.size) big = a[i];
     probeRow = Math.max(1, Math.min(NY - 2, Math.round(big.cy)));
@@ -386,6 +464,27 @@
     }
   }
 
+  function drawModel() {
+    if (!P.model) return;
+    var b = modelBox(NX, NY);
+    var x = PX(b.x0), y = PY(b.y0 + b.h), w = b.w * CS, h = b.h * CS;
+    var e = Math.max(1, CS * 0.28);
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(P.model.light, x - e, y - e, w + 2 * e, h + 2 * e);   // 外圈浅色描边
+    ctx.drawImage(P.model.dark, x, y, w, h);
+    if (P.modelSel) {
+      ctx.strokeStyle = '#5ec8ff';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(x - 2, y - 2, w + 4, h + 4);
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#5ec8ff';
+      ctx.beginPath(); ctx.arc(x + w, y + h / 2, 4, 0, 6.2832); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function drawTrails() {
     var frac = 1 - P.trail / 100;
     var alpha = P.trail >= 100 ? 0.9 : 1;
@@ -470,6 +569,7 @@
     if (el('showTrails').checked) drawTrails();
     if (el('showHeads').checked) drawHeads();
     drawShapes();
+    drawModel();
     if (el('showMarks').checked) drawMarks();
   }
 
@@ -520,11 +620,17 @@
   }
 
   function showErr(msg) {
+    toast(msg, 'err', 6000);
+  }
+  function showNote(msg) {
+    toast(msg, 'note', 3600);
+  }
+  function toast(msg, cls, ms) {
     var d = document.createElement('div');
-    d.className = 'err';
+    d.className = cls;
     d.textContent = msg;
     el('stage').appendChild(d);
-    setTimeout(function () { d.remove(); }, 6000);
+    setTimeout(function () { d.remove(); }, ms);
   }
 
   // ------------------------------------------------------------------ 诊断
@@ -595,6 +701,17 @@
     return Math.abs(Math.hypot(dx, dy) - s.size);
   }
 
+  function modelHandleDist(p) {
+    if (!P.model) return Infinity;
+    var b = modelBox(NX, NY);
+    return Math.hypot(p.x - (b.x0 + b.w), p.y - b.cy);
+  }
+  function modelInside(p) {
+    if (!P.model) return null;
+    var b = modelBox(NX, NY);
+    return (p.x >= b.x0 && p.x <= b.x0 + b.w && p.y >= b.y0 && p.y <= b.y0 + b.h) ? b : null;
+  }
+
   var drag = null;
   function capture(ev) {
     try { cv.setPointerCapture(ev.pointerId); } catch (e) { /* 合成事件没有活动指针 */ }
@@ -608,14 +725,30 @@
       ev.preventDefault();
       return;
     }
+    var mb0 = P.model ? modelBox(NX, NY) : null;
+    if (P.modelSel && mb0 && modelHandleDist(p) < Math.max(2, 0.05 * mb0.w)) {
+      drag = { mode: 'modelsize', d0: Math.max(1, Math.hypot(p.x - mb0.cx, p.y - mb0.cy)),
+               fs0: P.model.fs };
+      capture(ev);
+      ev.preventDefault();
+      return;
+    }
     var hit = -1;
     for (var i = a.length - 1; i >= 0; i--) if (inside(a[i], p.x, p.y)) { hit = i; break; }
     if (hit >= 0) {
       P.sel = hit;
+      P.modelSel = false;
       drag = { mode: 'move', i: hit, ox: p.x - a[hit].cx, oy: p.y - a[hit].cy };
       capture(ev);
     } else {
-      P.sel = -1;
+      var mb = modelInside(p);
+      if (mb) {
+        P.sel = -1; P.modelSel = true;
+        drag = { mode: 'modelmove', ox: p.x - mb.cx, oy: p.y - mb.cy };
+        capture(ev);
+      } else {
+        P.sel = -1; P.modelSel = false;
+      }
     }
     syncAll();
     ev.preventDefault();
@@ -623,14 +756,26 @@
 
   cv.addEventListener('pointermove', function (ev) {
     if (!drag) return;
-    var p = toCell(ev), s = P.shapes[drag.i], a = cs(), c = a[drag.i];
-    if (drag.mode === 'move') {
-      var cx = Math.max(c.size * 0.5, Math.min(NX - 1 - c.size * 0.5, p.x - drag.ox));
-      var cy = Math.max(c.size * 0.5, Math.min(NY - 1 - c.size * 0.5, p.y - drag.oy));
-      s.fx = cx / NX; s.fy = cy / NY;
+    var p = toCell(ev);
+    if (drag.mode === 'modelmove') {
+      var mb = modelBox(NX, NY);
+      var cx = Math.max(mb.w / 2, Math.min(NX - 1 - mb.w / 2, p.x - drag.ox));
+      var cy = Math.max(mb.h / 2, Math.min(NY - 1 - mb.h / 2, p.y - drag.oy));
+      P.model.fx = cx / NX; P.model.fy = cy / NY;
+    } else if (drag.mode === 'modelsize') {
+      var mb2 = modelBox(NX, NY);
+      var dist = Math.hypot(p.x - mb2.cx, p.y - mb2.cy);
+      P.model.fs = Math.max(2 / NX, Math.min(0.22, drag.fs0 * dist / drag.d0));
     } else {
-      var d = Math.hypot(p.x - c.cx, p.y - c.cy) / NX;
-      s.fs = Math.max(2 / NX, Math.min(0.22, d));
+      var s = P.shapes[drag.i], c = cs()[drag.i];
+      if (drag.mode === 'move') {
+        var cx2 = Math.max(c.size * 0.5, Math.min(NX - 1 - c.size * 0.5, p.x - drag.ox));
+        var cy2 = Math.max(c.size * 0.5, Math.min(NY - 1 - c.size * 0.5, p.y - drag.oy));
+        s.fx = cx2 / NX; s.fy = cy2 / NY;
+      } else {
+        var d = Math.hypot(p.x - c.cx, p.y - c.cy) / NX;
+        s.fs = Math.max(2 / NX, Math.min(0.22, d));
+      }
     }
     pushParams();
     updateProbe();
@@ -641,6 +786,13 @@
   cv.addEventListener('pointercancel', function () { drag = null; });
 
   cv.addEventListener('wheel', function (ev) {
+    if (P.modelSel && P.model) {
+      ev.preventDefault();
+      P.model.fs = Math.max(2 / NX, Math.min(0.22,
+        P.model.fs + (ev.deltaY > 0 ? -0.003 : 0.003)));
+      pushParams(); updateProbe(); syncAll();
+      return;
+    }
     if (P.sel < 0) return;
     ev.preventDefault();
     var s = P.shapes[P.sel];
@@ -650,6 +802,8 @@
 
   cv.addEventListener('dblclick', function (ev) {
     var p = toCell(ev);
+    if (modelInside(p)) return;
+    P.modelSel = false;
     P.shapes.push({ shape: P.newShape, fx: p.x / NX, fy: p.y / NY, fs: 0.05, ratio: 0.5, angle: 20 });
     P.sel = P.shapes.length - 1;
     pushParams(); updateProbe(); syncAll();
@@ -664,6 +818,12 @@
   });
 
   function delShape() {
+    if (P.modelSel) {
+      if (!P.model) return;
+      P.model = null; P.modelSel = false;
+      pushParams(); updateProbe(); syncAll();
+      return;
+    }
     if (P.sel < 0 || P.sel >= P.shapes.length) return;
     P.shapes.splice(P.sel, 1);
     if (P.sel >= P.shapes.length) P.sel = P.shapes.length - 1;
@@ -676,23 +836,46 @@
   }
 
   // ------------------------------------------------------------------ UI 同步
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
   function syncAll() {
     if (!f) return;
-    el('objs').innerHTML = P.shapes.map(function (s, i) {
-      return '<button class="chip' + (i === P.sel ? ' on' : '') + '" data-i="' + i + '">' +
+    var chips = P.shapes.map(function (s, i) {
+      return '<button class="chip' + (!P.modelSel && i === P.sel ? ' on' : '') + '" data-i="' + i + '">' +
         NAME[s.shape] + (i + 1) + ' · ' + Math.round(s.fs * NX) + '格</button>';
-    }).join('') || '<span class="hint">还没有障碍物：双击画布添加</span>';
-    var s = P.shapes[P.sel];
-    el('size').disabled = el('ratio').disabled = el('angle').disabled = el('del').disabled = !s;
+    }).join('');
+    if (P.model) {
+      var nm = P.model.name.length > 11 ? P.model.name.slice(0, 10) + '…' : P.model.name;
+      chips += '<button class="chip' + (P.modelSel ? ' on' : '') + '" data-model="1" title="' +
+        esc(P.model.name) + '">模型·' + esc(nm) + ' · ' + Math.round(P.model.fs * NX) + '格</button>';
+    }
+    el('objs').innerHTML = chips || '<span class="hint">还没有障碍物：双击画布添加</span>';
+
+    var s = P.modelSel ? null : P.shapes[P.sel];
+    var hasModel = !!(P.modelSel && P.model);
+    el('size').disabled = !s && !hasModel;
+    el('ratio').disabled = el('angle').disabled = !s;
+    el('del').disabled = !s && !hasModel;
     el('ellipseOnly').style.display = s && s.shape === 'ellipse' ? '' : 'none';
-    if (s) {
+    el('modelOpts').style.display = P.model ? '' : 'none';
+    el('axisOnly').style.display = P.model && P.model.kind === 'mesh' ? '' : 'none';
+    el('invertOnly').style.display = P.model && P.model.kind === 'image' ? '' : 'none';
+    if (P.model) { el('axis').value = P.model.axis; el('invert').checked = P.model.invert; }
+
+    if (s || hasModel) {
+      var sz = (s || P.model).fs * NX;
       el('size').max = Math.round(0.22 * NX);
-      el('size').value = Math.min(+el('size').max, s.fs * NX);
-      el('lvSize').textContent = (s.fs * NX).toFixed(1) + ' 格（D=' + (2 * s.fs * NX).toFixed(1) + '）';
-      el('ratio').value = s.ratio;
-      el('lvRatio').textContent = s.ratio.toFixed(2);
-      el('angle').value = s.angle;
-      el('lvAngle').textContent = s.angle + '°';
+      el('size').value = Math.min(+el('size').max, sz);
+      el('lvSize').textContent = sz.toFixed(1) + ' 格（D=' + (2 * sz).toFixed(1) + '）';
+      if (s) {
+        el('ratio').value = s.ratio;
+        el('lvRatio').textContent = s.ratio.toFixed(2);
+        el('angle').value = s.angle;
+        el('lvAngle').textContent = s.angle + '°';
+      }
     } else {
       el('lvSize').textContent = '—';
     }
@@ -711,6 +894,19 @@
   }
 
   function pyCommand() {
+    var tail = ['--nx ' + NX, '--ny ' + NY, '--re ' + Math.round(P.re), '--u ' + P.uInf.toFixed(2),
+      '--dt ' + P.dt.toFixed(2), '--iters ' + P.iters, '--vcg ' + P.vcg.toFixed(2)];
+    if (P.modelSel && P.model) {
+      var m = P.model;
+      var head = ['py fluid/run_sim.py',
+        (m.kind === 'mesh' ? '--stl "' + m.name + '"' : '--image "' + m.name + '"'),
+        '--size ' + (m.fs * NX).toFixed(1),
+        '--x-pos ' + m.fx.toFixed(3),
+        '--y-pos ' + m.fy.toFixed(3)];
+      if (m.kind === 'mesh') head.push('--axis ' + m.axis);
+      else if (m.invert) head.push('--invert');
+      return head.concat(tail).join(' ');
+    }
     var i = P.sel >= 0 && P.sel < P.shapes.length ? P.sel : 0;
     var s = P.shapes[i];
     if (!s) return 'py fluid/run_sim.py';
@@ -721,9 +917,7 @@
       '--x-pos ' + (cx / NX).toFixed(3),
       '--y-pos ' + (cy / NY).toFixed(3)];
     if (s.shape === 'ellipse') parts.push('--ratio ' + s.ratio.toFixed(2), '--angle ' + Math.round(s.angle));
-    parts.push('--nx ' + NX, '--ny ' + NY, '--re ' + Math.round(P.re), '--u ' + P.uInf.toFixed(2),
-      '--dt ' + P.dt.toFixed(2), '--iters ' + P.iters, '--vcg ' + P.vcg.toFixed(2));
-    return parts.join(' ');
+    return parts.concat(tail).join(' ');
   }
 
   // ------------------------------------------------------------------ 控件
@@ -744,16 +938,64 @@
   el('add').onclick = function () {
     P.shapes.push({ shape: P.newShape, fx: 0.6, fy: 0.5, fs: 0.05, ratio: 0.5, angle: 20 });
     P.sel = P.shapes.length - 1;
+    P.modelSel = false;
     pushParams(); updateProbe(); syncAll();
   };
   el('del').onclick = delShape;
+
+  function renderModel() {
+    var r = ModelMask.render(P.model.src, { axis: P.model.axis, invert: P.model.invert });
+    P.model.w = r.w; P.model.h = r.h;
+    P.model.light = r.canvas;
+    P.model.dark = tint(r.canvas, '#0a0e1a');
+  }
+
+  el('importBtn').onclick = function () { el('modelfile').click(); };
+  el('modelfile').onchange = function () {
+    var file = this.files && this.files[0];
+    this.value = '';
+    if (!file) return;
+    var oldAxis = P.model ? P.model.axis : 'z';
+    var oldInv = P.model ? P.model.invert : false;
+    ModelMask.load(file).then(function (src) {
+      P.model = { src: src, name: src.name, kind: src.kind, axis: oldAxis, invert: oldInv,
+                  fx: 0.3, fy: 0.5, fs: 0.07 };
+      renderModel();
+      P.modelSel = true; P.sel = -1;
+      build(); syncSliders(); syncAll();
+      showNote('已导入 ' + src.name + (src.kind === 'mesh'
+        ? '（' + src.count + ' 个三角形，沿 ' + P.model.axis.toUpperCase() + ' 轴投影）'
+        : '（图片轮廓）'));
+    }).catch(function (e) { showErr(e.message || String(e)); });
+  };
+  function rerenderModel() {
+    if (!P.model) return;
+    try { renderModel(); } catch (e) { showErr(e.message || String(e)); return; }
+    P.modelSel = true; P.sel = -1;
+    build(); syncSliders(); syncAll();
+  }
+  el('axis').onchange = function () { P.model.axis = this.value; rerenderModel(); };
+  el('invert').onchange = function () { P.model.invert = this.checked; rerenderModel(); };
   el('objs').onclick = function (ev) {
-    var b = ev.target.closest('button[data-i]');
+    var b = ev.target.closest('button');
     if (!b) return;
-    P.sel = +b.getAttribute('data-i');
+    if (b.hasAttribute('data-model')) {
+      P.modelSel = true; P.sel = -1;
+      syncAll();
+      return;
+    }
+    var i = b.getAttribute('data-i');
+    if (i == null) return;
+    P.modelSel = false;
+    P.sel = +i;
     syncAll();
   };
   el('size').oninput = function () {
+    if (P.modelSel && P.model) {
+      P.model.fs = +this.value / NX;
+      pushParams(); updateProbe(); syncAll();
+      return;
+    }
     var s = P.shapes[P.sel];
     if (!s) return;
     s.fs = +this.value / NX;
@@ -788,7 +1030,8 @@
   el('trail').oninput = function () { P.trail = +this.value; syncAll(); };
   el('png').onclick = function () {
     var a = document.createElement('a');
-    a.download = '绕流_Re' + Math.round(P.re) + '_' + (P.shapes[0] ? P.shapes[0].shape : 'empty') + '.png';
+    a.download = '绕流_Re' + Math.round(P.re) + '_' +
+      (P.model ? 'model' : (P.shapes[0] ? P.shapes[0].shape : 'empty')) + '.png';
     a.href = cv.toDataURL('image/png');
     a.click();
   };
@@ -845,6 +1088,7 @@
     b.onclick = function () {
       CASES[b.getAttribute('data-case')]();
       P.sel = 0;
+      P.model = null; P.modelSel = false;
       build(); syncSliders(); syncAll();
     };
   });

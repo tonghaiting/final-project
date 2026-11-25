@@ -207,8 +207,44 @@
     ctx.restore();
   }
 
+  let modelDark = null, modelLight = null;
+  /* Python 端把网格分辨率的固体掩膜按位打包进了 meta.obstacle.mask。
+     这里还原成两张同尺寸画布：深色主体 + 浅色描边层。 */
+  function buildModelLayers(o) {
+    const n = NX * NY;
+    const bin = atob(o.mask);
+    const bits = new Uint8Array(n);
+    for (let k = 0; k < n; k++) bits[k] = (bin.charCodeAt(k >> 3) >> (k & 7)) & 1;
+    const mk = (r, g, b) => {
+      const c = document.createElement('canvas');
+      c.width = NX; c.height = NY;
+      const g2 = c.getContext('2d');
+      const id = g2.createImageData(NX, NY);
+      for (let k = 0; k < n; k++) {
+        if (!bits[k]) continue;
+        const p = k * 4;
+        id.data[p] = r; id.data[p + 1] = g; id.data[p + 2] = b; id.data[p + 3] = 255;
+      }
+      g2.putImageData(id, 0, 0);
+      return c;
+    };
+    modelDark = mk(10, 14, 26);
+    modelLight = mk(201, 214, 240);
+  }
+
   function drawObstacle() {
     const o = M.obstacle;
+    if (o.shape === 'model') {
+      if (!modelDark) buildModelLayers(o);
+      ctx.save();
+      ctx.setTransform(1, 0, 0, -1, 0, H);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(modelLight, 0, 0, W, H);
+      const e = 1.5;
+      ctx.drawImage(modelDark, e, e, W - 2 * e, H - 2 * e);
+      ctx.restore();
+      return;
+    }
     ctx.save();
     ctx.translate(PX(o.cx), PY(o.cy));
     if (o.shape === 'ellipse') ctx.rotate(-o.angle * Math.PI / 180);
@@ -402,7 +438,9 @@
   const f2 = (v, n) => Number(v).toFixed(n);
   const rows = [
     ['网格', NX + ' × ' + NY],
-    ['物体', M.obstacle.shape + '  D=' + f2(M.D, 0) + ' 格'],
+    ['物体', (M.obstacle.shape === 'model'
+      ? '导入 ' + M.obstacle.name
+      : M.obstacle.shape) + '  D=' + f2(M.D, 0) + ' 格'],
     ['Re', f2(M.re, 0)],
     ['nu', M.nu.toExponential(2)],
     ['CFL', f2(M.cfl, 2)],

@@ -3,6 +3,8 @@
     py fluid/run_sim.py                          # 默认圆柱 Re=300
     py fluid/run_sim.py --shape square --re 120
     py fluid/run_sim.py --shape ellipse --size 14 --ratio 0.3 --angle 20
+    py fluid/run_sim.py --stl models/airfoil.stl --axis z --size 16
+    py fluid/run_sim.py --image outline.png --invert
     py fluid/run_sim.py --settle-transits 1.5 --periods 2
 
 导出 web/flow_data.js（浏览器 file:// 下可直接 <script> 读取）与 data/flow_data.json。
@@ -24,6 +26,7 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import geometry as geom  # noqa: E402
 from solver import Fluid, TracerSet, make_solid  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -78,6 +81,13 @@ def parse_args():
     g.add_argument("--angle", type=float, default=20.0, help="ellipse 倾角(度)")
     g.add_argument("--x-pos", type=float, default=0.18, help="物体横坐标占域长比例")
     g.add_argument("--y-pos", type=float, default=0.5, help="物体纵坐标占域高比例")
+    m = p.add_argument_group("导入模型（与 --shape 二选一）")
+    m.add_argument("--stl", default=None, help="STL 网格，沿 --axis 投影成二维剪影")
+    m.add_argument("--obj", default=None, help="OBJ 网格，沿 --axis 投影成二维剪影")
+    m.add_argument("--image", default=None, help="PNG/JPG 轮廓图：透明区或暗部当物体")
+    m.add_argument("--axis", choices=["x", "y", "z"], default="z",
+                   help="3D 模型沿哪个轴投影（z=俯视 xy，y=侧视 xz，x=侧视 yz）")
+    m.add_argument("--invert", action="store_true", help="图片反相：浅色物体 / 深色背景")
     w = p.add_argument_group("数值")
     w.add_argument("--nx", type=int, default=224)
     w.add_argument("--ny", type=int, default=132)
@@ -109,9 +119,22 @@ def main():
     nu = a.u * D / a.re
     cx = int(round(a.x_pos * a.nx))
     cy = int(round(a.y_pos * a.ny))
-    solid = make_solid(a.nx, a.ny, a.shape, cx, cy, a.size,
-                       a.ratio if a.shape == "ellipse" else 1.0,
-                       np.radians(a.angle) if a.shape == "ellipse" else 0.0)
+    given = [v for v in (a.stl, a.obj, a.image) if v]
+    if len(given) > 1:
+        sys.exit("--stl / --obj / --image 只能给一个")
+    model = None
+    if a.stl or a.obj:
+        model = ("mesh", a.stl or a.obj)
+        solid = geom.mesh_mask(model[1], a.nx, a.ny, a.size, cx, cy, axis=a.axis)
+    elif a.image:
+        model = ("image", a.image)
+        solid = geom.image_mask(model[1], a.nx, a.ny, a.size, cx, cy, invert=a.invert)
+    else:
+        solid = make_solid(a.nx, a.ny, a.shape, cx, cy, a.size,
+                           a.ratio if a.shape == "ellipse" else 1.0,
+                           np.radians(a.angle) if a.shape == "ellipse" else 0.0)
+    if not solid.any():
+        sys.exit("导入的轮廓没有落在网格里：检查 --size / --x-pos / --y-pos")
     if a.dt * a.u > 1.0:
         print("warning: CFL = u_inf*dt/h = %.2f > 1，半拉格朗日仍稳定但更耗散" % (a.dt * a.u))
 
@@ -122,8 +145,9 @@ def main():
     transit_steps = a.nx / (a.u * a.dt)
     settle = max(50, int(round(a.settle_transits * transit_steps)))
 
-    print("grid %dx%d  solid_cells=%d  D=%.1f  Re=%.0f  nu=%.5f  dt=%.2f  iters=%d  omega=%.2f"
-          % (a.nx, a.ny, int(solid.sum()), D, a.re, nu, a.dt, a.iters, a.omega))
+    print("grid %dx%d  solid_cells=%d  D=%.1f  Re=%.0f  nu=%.5f  dt=%.2f  iters=%d  omega=%.2f%s"
+          % (a.nx, a.ny, int(solid.sum()), D, a.re, nu, a.dt, a.iters, a.omega,
+             "  model=%s(%s)" % (os.path.basename(model[1]), a.axis) if model else ""))
     clock = time.time()
     for k in range(settle):
         f.step()
@@ -169,6 +193,12 @@ def main():
     wmax = float(np.percentile(np.abs(frames_arr), 99.5)) or 1.0
     fh, fw = int(frames_arr.shape[1]), int(frames_arr.shape[2])
 
+    obs = ({"shape": "model", "kind": model[0], "name": os.path.basename(model[1]),
+            "axis": a.axis, "cx": float(cx), "cy": float(cy), "size": float(a.size),
+            "mask": geom.encode_mask(solid)}
+           if model else
+           {"shape": a.shape, "cx": float(cx), "cy": float(cy),
+            "size": float(a.size), "ratio": float(a.ratio), "angle": float(a.angle)})
     data = {
         "meta": {
             "nx": a.nx, "ny": a.ny, "dt": a.dt, "u_inf": a.u, "nu": nu, "re": a.re,
@@ -179,9 +209,7 @@ def main():
             "div_rms": [f.div_rms[0], f.div_rms[1]],
             "wmax": wmax, "smax": smax, "path_max": mlen,
             "path_ranges": [[0.0, float(a.nx - 1)], [0.0, float(a.ny - 1)], [0.0, smax]],
-            "obstacle": {"shape": a.shape, "cx": float(cx), "cy": float(cy),
-                         "size": float(a.size), "ratio": float(a.ratio),
-                         "angle": float(a.angle)},
+            "obstacle": obs,
             "frames": {"w": fw, "h": fh, "sub": a.sub},
         },
         "lens": [int(v) for v in lens],

@@ -34,6 +34,12 @@
     return s;
   }
 
+  function composeMask(nx, ny, shapes, extra) {
+    const m = buildMask(nx, ny, shapes);
+    if (extra) for (let k = 0, n = nx * ny; k < n; k++) if (extra[k]) m[k] = 1;
+    return m;
+  }
+
   function sample(f, nx, ny, x, y) {
     const xc = x < 0 ? 0 : (x > nx - 1.0001 ? nx - 1.0001 : x);
     const yc = y < 0 ? 0 : (y > ny - 1.0001 ? ny - 1.0001 : y);
@@ -52,8 +58,9 @@
       this.iters = cfg.iters; this.eps = cfg.vcg;
       this.nu = cfg.uInf * cfg.D / cfg.re;
       this.shapes = cfg.shapes.slice();
+      this.extra = cfg.extra || null;
       const n = this.nx * this.ny;
-      this.solid = buildMask(this.nx, this.ny, this.shapes);
+      this.solid = composeMask(this.nx, this.ny, this.shapes, this.extra);
       this.u = new Float32Array(n).fill(cfg.uInf);
       this.v = new Float32Array(n);
       this.p = new Float32Array(n);
@@ -66,10 +73,11 @@
 
     /* 换掩膜后：固体内归零(无滑移)，刚从固体里解放出来的格子补上来流速度，
        否则它们会停在 0 上，要靠扩散慢慢填，画面里留下一个假的速度洞。 */
-    setShapes(shapes) {
+    setShapes(shapes, extra) {
       const prev = this.solid;
       this.shapes = shapes.slice();
-      this.solid = buildMask(this.nx, this.ny, shapes);
+      this.extra = extra || null;
+      this.solid = composeMask(this.nx, this.ny, this.shapes, this.extra);
       for (let k = 0, n = this.nx * this.ny; k < n; k++) {
         if (this.solid[k]) { this.u[k] = 0; this.v[k] = 0; }
         else if (prev[k]) { this.u[k] = this.uInf; this.v[k] = 0; this.p[k] = 0; }
@@ -348,5 +356,5 @@
     return D / (2 * half) / uInf;
   }
 
-  global.FluidSim = { Fluid, Tracers, buildMask, sample, strouhal };
+  global.FluidSim = { Fluid, Tracers, buildMask, composeMask, sample, strouhal };
 })(typeof window !== 'undefined' ? window : globalThis);
