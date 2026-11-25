@@ -6,6 +6,7 @@
 
 | 部分 | 职责 |
 | --- | --- |
+| `index.html` | 根目录跳转页，只用于 GitHub Pages（跳到 `web/index.html`） |
 | `fluid/solver.py` | 数值求解器（平流、扩散、压力投影、浸没固体、示踪粒子） |
 | `fluid/run_sim.py` | 命令行入口：跑模拟、算诊断量、导出可视化数据 |
 | `web/fluid-sim.js` | 求解器的 JavaScript 移植，供交互面板在浏览器里实时计算 |
@@ -228,10 +229,12 @@ Strouhal 数和速度峰值都落在理论值附近，说明求解器行为是�
 仓库里没有构建步骤，静态文件直接发布即可：
 
 1. 推到 GitHub 后进入仓库 **Settings → Pages**；
-2. **Source** 选 `Deploy from a branch`，分支选 `main`，目录选 **`/web`**；
+2. **Source** 选 `Deploy from a branch`，分支选 `main`，目录选 **`/ (root)`**；
 3. 等半分钟，访问 `https://tonghaiting.github.io/final-project/`
-   （交互页是 `index.html`，回放页是 `/replay.html`）。
+   （交互页是 `web/index.html`，回放页是 `web/replay.html`）。
 
-`web/` 目录里只有 `index.html`、`replay.html`、`fluid-sim.js`、`flow_data.js` 四个文件，
-全部是相对路径引用，本地 `file://` 和 Pages 上 `https://` 都能跑。回放页的数据
+Pages 的分支源只允许根目录或 `/docs` 两个位置，`/web` 这类子目录选不到。
+所以根目录放了一个 `index.html`，只做一件事：跳到 `web/index.html`。
+页面本身都在 `web/` 里，只有 `index.html`、`replay.html`、`fluid-sim.js`、`flow_data.js`
+四个文件，全部相对路径引用，本地 `file://` 和 Pages 上 `https://` 都能跑。回放页的数据
 `flow_data.js` 已随仓库提交，克隆后不用重跑 Python 就能看到结果。
