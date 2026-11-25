@@ -3,341 +3,893 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>绕流轨迹可视化 · 不可压缩 Navier-Stokes 投影法</title>
+<title>绕流交互实验台 · 可拖拽障碍物 + 实时不可压缩 Navier-Stokes</title>
 <style>
   :root { --bg:#0b1020; --panel:#131a2e; --line:#26314f; --fg:#dfe6f5; --dim:#8fa0c4; --acc:#5ec8ff; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--fg);
          font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
-  header { padding:18px 22px 12px; border-bottom:1px solid var(--line); }
-  h1 { margin:0 0 6px; font-size:19px; font-weight:600; }
-  .sub { color:var(--dim); font-size:12.5px; }
-  .wrap { display:flex; gap:18px; padding:18px 22px 28px; align-items:flex-start;
-          flex-wrap:wrap; }
-  #stage { flex:1 1 0; min-width:0; }
+  a { color:var(--acc); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  header { padding:16px 22px 12px; border-bottom:1px solid var(--line); }
+  .hbar { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; }
+  h1 { margin:0 0 4px; font-size:19px; font-weight:600; }
+  .sub { color:var(--dim); font-size:12.5px; max-width:760px; }
+  nav { margin-left:auto; display:flex; gap:6px; }
+  nav a { padding:5px 11px; border:1px solid var(--line); border-radius:5px; font-size:13px; color:var(--dim); }
+  nav a.on, nav a:hover { color:var(--fg); border-color:var(--acc); text-decoration:none; }
+  main { display:flex; gap:18px; padding:18px 22px 30px; align-items:flex-start; }
+  #stage { flex:1 1 0; min-width:0; position:relative; }
   canvas { background:var(--bg); border:1px solid var(--line); border-radius:6px;
-           width:100%; height:auto; display:block; }
-  aside { width:300px; flex:0 0 300px; display:flex; flex-direction:column; gap:14px; }
-  @media (max-width:760px) {
-    #stage, aside { flex:1 1 100%; width:100%; }
-  }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px 14px; }
-  .card h2 { margin:0 0 10px; font-size:13px; letter-spacing:.06em; color:var(--dim);
+           width:100%; height:auto; display:block; touch-action:none; cursor:crosshair; }
+  aside { width:330px; flex:0 0 330px; display:flex; flex-direction:column; gap:12px; }
+  @media (max-width:880px) { main { flex-wrap:wrap; } #stage, aside { flex:1 1 100%; width:100%; } }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:11px 13px; }
+  .card h2 { margin:0 0 9px; font-size:12.5px; letter-spacing:.06em; color:var(--dim);
              font-weight:600; text-transform:uppercase; }
-  label { display:block; font-size:12.5px; color:var(--dim); margin:9px 0 3px; }
-  .row { display:flex; gap:8px; align-items:center; }
-  input[type=range] { width:100%; }
-  select, button { background:#1b2440; color:var(--fg); border:1px solid var(--line);
-                   border-radius:4px; padding:6px 10px; font-size:13px; font-family:inherit; }
+  label { display:block; font-size:12.5px; color:var(--dim); margin:8px 0 2px; }
+  label .v { color:var(--fg); font-variant-numeric:tabular-nums; float:right; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .row > * { flex:1 1 0; }
+  input[type=range] { width:100%; margin:2px 0 4px; accent-color:#5ec8ff; }
+  select, button, textarea { background:#1b2440; color:var(--fg); border:1px solid var(--line);
+                   border-radius:4px; padding:5px 9px; font-size:12.5px; font-family:inherit; }
   button:hover { border-color:var(--acc); cursor:pointer; }
   button.pri { background:#1d4a6b; border-color:#2f6f9c; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
   table { width:100%; border-collapse:collapse; font-size:12.5px; }
-  td { padding:2.5px 0; }
+  td { padding:2px 0; }
   td.k { color:var(--dim); }
   td.v { text-align:right; font-variant-numeric:tabular-nums; }
-  .bar { height:10px; border-radius:3px; margin-top:6px; }
-  .hint { font-size:12px; color:var(--dim); }
-  .warn { background:#3a1d22; border:1px solid #6d2b34; padding:14px; border-radius:6px; }
+  .hint { font-size:11.5px; color:var(--dim); line-height:1.5; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+  .chip { flex:0 0 auto; padding:4px 9px; font-size:12px; border-radius:20px; }
+  .chip.on { border-color:var(--acc); color:#cdeeff; background:#16344a; }
+  .err { background:#3a1d22; border:1px solid #6d2b34; padding:8px 11px; border-radius:5px;
+         font-size:12.5px; margin-top:8px; }
+  .tip { position:absolute; left:10px; bottom:10px; background:rgba(11,16,32,.72);
+         border:1px solid var(--line); border-radius:5px; padding:4px 9px; font-size:11.5px; color:var(--dim); }
+  .cmd { width:100%; height:58px; resize:vertical; font-family:ui-monospace,Consolas,monospace;
+         font-size:11.5px; line-height:1.45; margin-top:6px; }
   code { background:#0d1526; padding:1px 5px; border-radius:3px; font-size:12px; }
   kbd { background:#0d1526; border:1px solid var(--line); border-radius:3px; padding:0 5px; font-size:11px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>物体绕流的流动轨迹可视化</h1>
-  <div class="sub">numpy 求解不可压缩 Navier-Stokes（半拉格朗日平流 + 压力投影 + 浸没固体），
-    浏览器只负责播放 Python 算出的示踪粒子轨迹与涡度场</div>
+  <div class="hbar">
+    <div>
+      <h1>绕流交互实验台</h1>
+      <div class="sub">拖动障碍物、改流体性质、换分辨率，浏览器里实时求解不可压缩 Navier-Stokes。
+        需要出正式结果时，把参数交给 Python 版复算。</div>
+    </div>
+    <nav>
+      <a class="on" href="index.html">实时交互</a>
+      <a href="replay.html">Python 回放</a>
+      <a href="https://github.com/tonghaiting/final-project" target="_blank" rel="noopener">仓库</a>
+    </nav>
+  </div>
 </header>
 
-<div class="wrap">
-  <div id="stage"><canvas id="cv"></canvas></div>
+<main>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div class="tip">拖动=移动 · 拖边缘/滚轮=改尺寸 · 双击空白=添加 · Delete=删除</div>
+  </div>
+
   <aside>
     <div class="card">
-      <h2>播放</h2>
+      <h2>运行</h2>
       <div class="row">
         <button id="play" class="pri">暂停</button>
-        <button id="reset">回到开头</button>
+        <button id="step1">单步</button>
+        <button id="clear">重置流场</button>
       </div>
-      <label>记录时刻 <span id="tlabel"></span></label>
-      <input type="range" id="scrub" min="0" max="1" value="0" step="1">
-      <label>播放速度</label>
-      <select id="rate">
-        <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
-        <option value="1" selected>1×</option><option value="2">2×</option>
-        <option value="4">4×</option>
+      <label>每帧物理步数（越大流得越快、越费 CPU）</label>
+      <select id="spf"><option value="1" selected>1× 实时</option><option value="2">2×</option>
+        <option value="4">4×</option><option value="8">8× 快速定型</option></select>
+      <label>网格分辨率</label>
+      <select id="grid">
+        <option value="fast">流畅 128 × 76</option>
+        <option value="mid" selected>标准 168 × 100</option>
+        <option value="fine">精细 224 × 132</option>
       </select>
-      <label>拖尾长度 <span id="lenlab"></span></label>
-      <input type="range" id="trail" min="10" max="100" value="45" step="5">
+    </div>
+
+    <div class="card">
+      <h2>障碍物</h2>
+      <div class="chips" id="objs"></div>
+      <div class="row">
+        <select id="newshape">
+          <option value="circle" selected>圆形</option>
+          <option value="square">方形</option>
+          <option value="ellipse">椭圆</option>
+        </select>
+        <button id="add">添加一个</button>
+        <button id="del">删除选中</button>
+      </div>
+      <label>特征半径 <span class="v" id="lvSize"></span></label>
+      <input type="range" id="size" min="2" max="40" step="0.5">
+      <div id="ellipseOnly">
+        <label>短轴 / 长轴 <span class="v" id="lvRatio"></span></label>
+        <input type="range" id="ratio" min="0.15" max="1" step="0.01" value="0.5">
+        <label>倾角 <span class="v" id="lvAngle"></span></label>
+        <input type="range" id="angle" min="-60" max="60" step="1" value="20">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>流体性质</h2>
+      <label>雷诺数 Re <span class="v" id="lvRe"></span></label>
+      <input type="range" id="re" min="0" max="100" step="0.5" value="50">
+      <label>来流速度 u<sub>∞</sub> <span class="v" id="lvU"></span></label>
+      <input type="range" id="u" min="0.2" max="2" step="0.05" value="1">
+      <label>时间步长 dt（CFL = u<sub>∞</sub>dt/h）<span class="v" id="lvDt"></span></label>
+      <input type="range" id="dt" min="0.25" max="1.5" step="0.05" value="1">
+      <label>压力 Poisson 迭代数 <span class="v" id="lvIt"></span></label>
+      <input type="range" id="iters" min="10" max="80" step="5" value="40">
+      <label>涡度约束 eps <span class="v" id="lvVcg"></span></label>
+      <input type="range" id="vcg" min="0" max="0.3" step="0.01" value="0.08">
+      <div class="hint" id="derive"></div>
+    </div>
+
+    <div class="card">
+      <h2>显示</h2>
       <label>背景场</label>
-      <select id="field">
+      <select id="view">
         <option value="omega" selected>涡度 ω（蓝正红负）</option>
+        <option value="speed">速度 |u|</option>
         <option value="none">不画背景</option>
       </select>
+      <div class="hint">背景色标 0 → 2u∞（紫→橙→白，势流绕柱峰值正好 2u∞）；轨迹色标 0 → 1.6u∞</div>
+      <label>示踪粒子数 <span class="v" id="lvN"></span></label>
+      <input type="range" id="tracers" min="0" max="400" step="10" value="160">
+      <label>拖尾长度 <span class="v" id="lvTrail"></span></label>
+      <input type="range" id="trail" min="10" max="100" step="5" value="55">
       <div class="row" style="margin-top:8px">
         <label style="margin:0"><input type="checkbox" id="showTrails" checked> 轨迹</label>
         <label style="margin:0"><input type="checkbox" id="showHeads" checked> 粒子</label>
         <label style="margin:0"><input type="checkbox" id="showMarks" checked> 标注</label>
       </div>
-      <label>轨迹着色 = 局部速度</label>
-      <div class="bar" id="sbar"></div>
-      <div class="hint" id="slabel"></div>
-      <div class="hint" style="margin-top:10px"><kbd>空格</kbd> 播放/暂停 · <kbd>←</kbd><kbd>→</kbd> 单步</div>
     </div>
 
     <div class="card">
-      <h2>本次模拟</h2>
+      <h2>诊断</h2>
       <table id="stats"></table>
-      <div class="bar" id="obar"></div>
-      <div class="hint" id="olabel"></div>
+      <div class="hint" id="state" style="margin-top:6px"></div>
+      <div class="hint">St 是当前网格上的实时估计：粗网格的有效 Re 偏低，St 会比精细网格小 10% 左右。</div>
     </div>
 
     <div class="card">
-      <h2>出图</h2>
-      <button id="png" class="pri" style="width:100%">导出当前画面 PNG</button>
-      <div class="hint" style="margin-top:8px">导出的图可直接插入报告；换一帧再导即可得到不同时刻的对比图。</div>
+      <h2>预置算例</h2>
+      <div class="row">
+        <button data-case="street">圆柱涡街</button>
+        <button data-case="square">方柱</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button data-case="foil">迎角椭圆</button>
+        <button data-case="two">双物体</button>
+        <button data-case="low">低 Re 定常</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>出图与复算</h2>
+      <div class="row">
+        <button id="png" class="pri" style="flex:2 1 0">导出 PNG</button>
+        <button id="share" style="flex:1 1 0">复制链接</button>
+      </div>
+      <label>交给 Python 复算（在仓库根目录执行）</label>
+      <textarea id="cmd" class="cmd" readonly spellcheck="false"></textarea>
+      <div class="row" style="margin-top:6px">
+        <button id="copycmd">复制命令</button>
+      </div>
+      <div class="hint" style="margin-top:6px">Python 版一次只支持一个物体，这里导出的是当前选中（或第一个）障碍物；
+        网格、dt、Re 保持一致数值才可比。JS 用 Gauss-Seidel、Python 用 masked-Jacobi，
+        St 会差几个百分点。</div>
     </div>
   </aside>
-</div>
+</main>
 
-<script src="flow_data.js"></script>
+<script src="fluid-sim.js"></script>
 <script>
 (function () {
-  const D = window.FLOW_DATA;
-  const stage = document.getElementById('stage');
-  if (!D || !D.meta) {
-    stage.innerHTML = '<div class="warn">没有读到 <code>web/flow_data.js</code>。<br>' +
-      '先在仓库根目录运行：<br><code>py fluid/run_sim.py</code><br>' +
-      '生成数据后刷新本页即可。</div>';
-    return;
+  'use strict';
+  var FS = window.FluidSim;
+  var el = function (id) { return document.getElementById(id); };
+  var cv = el('cv'), ctx = cv.getContext('2d');
+  var NAME = { circle: '圆', square: '方', ellipse: '椭' };
+  var GRID = { fast: { nx: 128, ny: 76, iters: 30 }, mid: { nx: 168, ny: 100, iters: 40 },
+               fine: { nx: 224, ny: 132, iters: 60 } };
+  var TRAIL_PTS = 90, NB = 10;
+  var BANDS = [[0.75, 1, 1], [0.45, 0.75, 0.5], [0, 0.45, 0.18]];
+
+  var P = {
+    grid: 'mid', re: 300, uInf: 1, dt: 1, iters: 40, vcg: 0.08,
+    view: 'omega', tracers: 160, trail: 55, spf: 1, running: true,
+    shapes: [{ shape: 'circle', fx: 0.18, fy: 0.5, fs: 0.0625, ratio: 1, angle: 0 }],
+    sel: 0, newShape: 'circle'
+  };
+
+  // ------------------------------------------------------------------ 色标
+  function lerp(a, b, t) {
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
   }
-  const M = D.meta, CS = 5, NX = M.nx, NY = M.ny, Q = 32767;
-  const W = NX * CS, H = NY * CS;
-  const cv = document.getElementById('cv');
-  cv.width = W; cv.height = H;
-  const ctx = cv.getContext('2d');
-
-  const PX = x => (x + 0.5) * CS;
-  const PY = y => (NY - 1 - y + 0.5) * CS;   // y 轴向上，与右手系一致
-
-  function int16(b64) {
-    const bin = atob(b64), n = bin.length, by = new Uint8Array(n);
-    for (let i = 0; i < n; i++) by[i] = bin.charCodeAt(i);
-    return new Int16Array(by.buffer);
-  }
-  const norm = q => (q / Q + 1) * 0.5;
-
-  // ---------------------------------------------------------------- 轨迹解码
-  const R = M.path_ranges, ML = M.path_max;
-  const pq = int16(D.paths);
-  const segs = D.lens.map((len, k) => {
-    const x = new Float32Array(len), y = new Float32Array(len), s = new Float32Array(len);
-    for (let j = 0; j < len; j++) {
-      const b = (k * ML + j) * 3;
-      x[j] = norm(pq[b]) * R[0][1];
-      y[j] = norm(pq[b + 1]) * R[1][1];
-      s[j] = norm(pq[b + 2]) * R[2][1];
-    }
-    return { x, y, s, len, t0: D.t0[k], mean: s.slice(0, len).reduce((a, c) => a + c, 0) / Math.max(1, len) };
-  });
-
-  // --------------------------------------------------------------- 色标
-  function lerp(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
-  const SPEED = [[0, [46, 16, 74]], [0.3, [150, 46, 74]], [0.55, [222, 96, 40]],
-                 [0.75, [248, 168, 30]], [0.9, [250, 224, 90]], [1, [252, 252, 210]]];
+  var SPEED = [[0, [46, 16, 74]], [0.3, [150, 46, 74]], [0.55, [222, 96, 40]],
+               [0.75, [248, 168, 30]], [0.9, [250, 224, 90]], [1, [252, 252, 210]]];
   function speedRGB(t) {
     t = Math.max(0, Math.min(1, t));
-    for (let i = 1; i < SPEED.length; i++)
+    for (var i = 1; i < SPEED.length; i++)
       if (t <= SPEED[i][0]) {
-        const a = SPEED[i - 1], b = SPEED[i];
+        var a = SPEED[i - 1], b = SPEED[i];
         return lerp(a[1], b[1], (t - a[0]) / (b[0] - a[0]));
       }
     return SPEED[SPEED.length - 1][1];
   }
-  const NB = 12, bucketRGB = [];
-  for (let b = 0; b < NB; b++) {
-    const c = speedRGB((b + 0.5) / NB);
-    bucketRGB.push('rgb(' + c.map(v => v | 0).join(',') + ')');
+  var SLUT = new Uint8Array(64 * 3);
+  for (var i0 = 0; i0 < 64; i0++) {
+    var c0 = speedRGB((i0 + 0.5) / 64);
+    SLUT[i0 * 3] = c0[0] | 0; SLUT[i0 * 3 + 1] = c0[1] | 0; SLUT[i0 * 3 + 2] = c0[2] | 0;
+  }
+  var BASE_W = [11, 16, 32], POS_W = [86, 200, 255], NEG_W = [255, 104, 66];
+  var WLUT = new Uint8Array(256 * 3);
+  for (var i1 = 0; i1 < 256; i1++) {
+    var v1 = i1 / 127.5 - 1, c1 = v1 >= 0
+      ? lerp(BASE_W, POS_W, Math.pow(v1, 0.55)) : lerp(BASE_W, NEG_W, Math.pow(-v1, 0.55));
+    WLUT[i1 * 3] = c1[0] | 0; WLUT[i1 * 3 + 1] = c1[1] | 0; WLUT[i1 * 3 + 2] = c1[2] | 0;
+  }
+  var bucketRGB = [];
+  for (var b0 = 0; b0 < NB; b0++) {
+    var c2 = speedRGB((b0 + 0.5) / NB);
+    bucketRGB.push('rgb(' + (c2[0] | 0) + ',' + (c2[1] | 0) + ',' + (c2[2] | 0) + ')');
   }
 
-  // ------------------------------------------------------ 涡度帧解码并预着色
-  const FW = M.frames.w, FH = M.frames.h, SUB = M.frames.sub;
-  const wq = int16(D.frames), NF = wq.length / (FW * FH);
-  const base = [11, 16, 32], pos = [86, 200, 255], neg = [255, 104, 66];
-  const off = document.createElement('canvas');
-  off.width = FW; off.height = FH;
-  const octx = off.getContext('2d');
-  const frameImgs = [];
-  for (let f = 0; f < NF; f++) {
-    const img = octx.createImageData(FW, FH);
-    for (let p = 0; p < FW * FH; p++) {
-      const v = Math.max(-1, Math.min(1, wq[f * FW * FH + p] / Q));
-      const c = v >= 0 ? lerp(base, pos, Math.pow(v, 0.55)) : lerp(base, neg, Math.pow(-v, 0.55));
-      img.data[p * 4] = c[0] | 0; img.data[p * 4 + 1] = c[1] | 0;
-      img.data[p * 4 + 2] = c[2] | 0; img.data[p * 4 + 3] = 255;
+  // ------------------------------------------------------------------ 状态
+  var NX = 0, NY = 0, CS = 5, W = 0, H = 0;
+  var f = null, tr = null, off = null, octx = null, fimg = null;
+  var probe = [], steps = 0, emaMs = 0, fps = 0, wScale = 0.08, peakU = 0;
+  var probeRow = 0, probeCol = 0;
+
+  function cs() { return cellShapes(); }
+  function cellShapes() {
+    return P.shapes.map(function (s) {
+      return { shape: s.shape, cx: s.fx * NX, cy: s.fy * NY, size: s.fs * NX,
+               ratio: s.ratio, angle: s.angle };
+    });
+  }
+  function charD() {
+    var m = 0;
+    for (var i = 0; i < P.shapes.length; i++) m = Math.max(m, P.shapes[i].fs * NX);
+    return Math.max(4, 2 * m);
+  }
+
+  // ------------------------------------------------------------------ 建场
+  function build() {
+    var g = GRID[P.grid];
+    NX = g.nx; NY = g.ny;
+    CS = Math.max(2, Math.round(1120 / NX));
+    W = NX * CS; H = NY * CS;
+    cv.width = W; cv.height = H;
+    if (!P.iters) P.iters = g.iters;
+    f = new FS.Fluid({ nx: NX, ny: NY, dt: P.dt, uInf: P.uInf, iters: P.iters, vcg: P.vcg,
+                       D: charD(), re: P.re, shapes: cs() });
+    tr = new FS.Tracers(f, P.tracers, TRAIL_PTS);
+    off = document.createElement('canvas');
+    off.width = NX; off.height = NY;
+    octx = off.getContext('2d');
+    fimg = octx.createImageData(NX, NY);
+    probe = []; steps = 0; wScale = 0.08; peakU = P.uInf;
+    el('size').max = Math.round(0.22 * NX);
+    updateProbe();
+    syncAll();
+  }
+
+  function pushParams() {
+    if (!f) return;
+    f.dt = P.dt; f.uInf = P.uInf; f.iters = P.iters; f.eps = P.vcg;
+    f.nu = P.uInf * charD() / Math.max(1, P.re);
+    f.setShapes(cs());
+  }
+
+  function updateProbe() {
+    var a = cs();
+    if (!a.length) { probeRow = Math.round(NY / 2); probeCol = Math.round(NX * 0.6); return; }
+    var big = a[0];
+    for (var i = 1; i < a.length; i++) if (a[i].size > big.size) big = a[i];
+    probeRow = Math.max(1, Math.min(NY - 2, Math.round(big.cy)));
+    probeCol = Math.max(1, Math.min(NX - 2, Math.round(big.cx + 8 * big.size)));
+  }
+
+  // ------------------------------------------------------------------ 场渲染
+  var smA = null, smB = null;
+  /* collocated 网格 + 压力投影会留下奇偶棋盘模态，逐格画 ω 是一层锯齿。
+     Python 导出时 block_mean 降采样 4× 顺手平滑掉了，这里必须显式滤。
+     用二项式 5 点核 [1,4,6,4,1]/16 可分离卷积：它在 Nyquist 频率上响应恰好为 0，
+     一横一竖就把棋盘模态彻底消掉，比 3×3 均值干净得多。 */
+  function blurW(w) {
+    var n = NX * NY;
+    if (!smA || smA.length !== n) { smA = new Float32Array(n); smB = new Float32Array(n); }
+    var K = [1, 4, 6, 4, 1], i, j, t, s, ii, jj, oi, oj;
+    for (j = 0; j < NY; j++) {
+      oj = j * NX;
+      for (i = 0; i < NX; i++) {
+        s = 0;
+        for (t = 0; t < 5; t++) {
+          ii = i + t - 2;
+          s += K[t] * w[oj + (ii < 0 ? 0 : (ii >= NX ? NX - 1 : ii))];
+        }
+        smA[oj + i] = s * 0.0625;
+      }
     }
-    frameImgs.push(img);
+    for (j = 0; j < NY; j++) {
+      oi = j * NX;
+      for (i = 0; i < NX; i++) {
+        s = 0;
+        for (t = 0; t < 5; t++) {
+          jj = j + t - 2;
+          s += K[t] * smA[(jj < 0 ? 0 : (jj >= NY ? NY - 1 : jj)) * NX + i];
+        }
+        smB[oi + i] = s * 0.0625;
+      }
+    }
+    return smB;
   }
 
-  const buckets = Array.from({ length: NB }, () => []);
-  // 轨迹按局部速度着色，色标以 u∞ 为基准(1.6 u∞ 封顶)，否则整幅图都挤在同一色相里
-  const SPEED_MAX = 1.6 * M.u_inf;
-  segs.forEach(s => buckets[Math.min(NB - 1, (s.mean / SPEED_MAX * NB) | 0)].push(s));
-
-  // --------------------------------------------------------------- 静态图层
-  function drawField(k) {
-    octx.putImageData(frameImgs[Math.min(k, NF - 1)], 0, 0);
-    ctx.imageSmoothingEnabled = true;
-    ctx.save();
-    ctx.setTransform(1, 0, 0, -1, 0, H);          // 垂直翻转，令 +y 朝上
-    ctx.drawImage(off, 0, 0, W, H);
-    ctx.restore();
+  function paintField() {
+    var d = fimg.data, n = NX * NY, k, p;
+    if (P.view === 'speed') {
+      // 背景用 2u∞ 归一（势流绕柱的峰值就是 2u∞），来流落在色标中段，快慢才分得开
+      var inv = 1 / (2.0 * Math.max(1e-9, f.uInf));
+      for (k = 0, p = 0; k < n; k++, p += 4) {
+        if (f.solid[k]) { d[p] = 9; d[p + 1] = 12; d[p + 2] = 22; d[p + 3] = 255; continue; }
+        var t = Math.hypot(f.u[k], f.v[k]) * inv;
+        var q = ((t > 1 ? 1 : t) * 63) | 0;
+        d[p] = SLUT[q * 3]; d[p + 1] = SLUT[q * 3 + 1]; d[p + 2] = SLUT[q * 3 + 2]; d[p + 3] = 255;
+      }
+    } else {
+      var w = blurW(f.vorticity()), iw = 1 / Math.max(1e-6, wScale);
+      for (k = 0, p = 0; k < n; k++, p += 4) {
+        if (f.solid[k]) { d[p] = 9; d[p + 1] = 12; d[p + 2] = 22; d[p + 3] = 255; continue; }
+        var v = w[k] * iw;
+        v = v < -1 ? -1 : (v > 1 ? 1 : v);
+        var q2 = ((v + 1) * 127.5) | 0;
+        d[p] = WLUT[q2 * 3]; d[p + 1] = WLUT[q2 * 3 + 1]; d[p + 2] = WLUT[q2 * 3 + 2]; d[p + 3] = 255;
+      }
+    }
+    octx.putImageData(fimg, 0, 0);
   }
 
-  function drawObstacle() {
-    const o = M.obstacle;
-    ctx.save();
-    ctx.translate(PX(o.cx), PY(o.cy));
-    if (o.shape === 'ellipse') ctx.rotate(-o.angle * Math.PI / 180);
-    ctx.beginPath();
-    const r = o.size * CS;
-    if (o.shape === 'circle') ctx.arc(0, 0, r, 0, 6.2832);
-    else if (o.shape === 'square') ctx.rect(-r, -r, 2 * r, 2 * r);
-    else ctx.ellipse(0, 0, r, r * o.ratio, 0, 0, 6.2832);
-    ctx.fillStyle = '#0a0e1a';
-    ctx.fill();
-    ctx.strokeStyle = '#c9d6f0';
-    ctx.lineWidth = 1.6;
-    ctx.stroke();
-    ctx.restore();
+  var PX = function (x) { return (x + 0.5) * CS; };
+  var PY = function (y) { return (NY - 1 - y + 0.5) * CS; };
+
+  function drawShapes() {
+    var a = cs();
+    for (var i = 0; i < a.length; i++) {
+      var s = a[i], sel = i === P.sel;
+      ctx.save();
+      ctx.translate(PX(s.cx), PY(s.cy));
+      if (s.shape === 'ellipse') ctx.rotate(-s.angle * Math.PI / 180);
+      var r = s.size * CS;
+      ctx.beginPath();
+      if (s.shape === 'circle') ctx.arc(0, 0, r, 0, 6.2832);
+      else if (s.shape === 'square') ctx.rect(-(r + CS / 2), -(r + CS / 2), 2 * r + CS, 2 * r + CS);
+      else ctx.ellipse(0, 0, r, r * s.ratio, 0, 0, 6.2832);
+      ctx.fillStyle = '#0a0e1a'; ctx.fill();
+      ctx.strokeStyle = sel ? '#5ec8ff' : '#c9d6f0';
+      ctx.lineWidth = sel ? 2 : 1.4;
+      ctx.stroke();
+      if (sel) {
+        ctx.fillStyle = '#5ec8ff';
+        ctx.beginPath(); ctx.arc(r, 0, 4, 0, 6.2832); ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  function drawTrails() {
+    var frac = 1 - P.trail / 100;
+    var alpha = P.trail >= 100 ? 0.9 : 1;
+    var buck = [], k;
+    for (k = 0; k < NB; k++) buck.push([]);
+    for (k = 0; k < tr.n; k++)
+      buck[Math.min(NB - 1, (tr.spd[k] / (1.6 * f.uInf) * NB) | 0)].push(k);
+    var paths = [];
+    for (k = 0; k < tr.n; k++) paths.push(tr.path(k));
+    ctx.lineWidth = 1.1; ctx.lineJoin = 'round';
+    for (var bi = 0; bi < BANDS.length; bi++) {
+      var lo = BANDS[bi][0], hi = BANDS[bi][1];
+      var start = Math.max(frac, lo), end = Math.min(1, hi);
+      if (start >= end) continue;
+      ctx.globalAlpha = alpha * BANDS[bi][2];
+      for (var bk = 0; bk < NB; bk++) {
+        ctx.strokeStyle = bucketRGB[bk];
+        ctx.beginPath();
+        var any = false;
+        for (var m = 0; m < buck[bk].length; m++) {
+          var p = paths[buck[bk][m]], np = p.len;
+          if (np < 3) continue;
+          var j0 = Math.floor((np - 1) * start), j1 = Math.floor((np - 1) * end);
+          if (j1 <= j0) continue;
+          any = true;
+          ctx.moveTo(PX(p.pts[j0 * 3]), PY(p.pts[j0 * 3 + 1]));
+          for (var j = j0 + 1; j <= j1; j++)
+            ctx.lineTo(PX(p.pts[j * 3]), PY(p.pts[j * 3 + 1]));
+        }
+        if (any) ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawHeads() {
+    var buck = [], k;
+    for (k = 0; k < NB; k++) buck.push([]);
+    for (k = 0; k < tr.n; k++)
+      buck[Math.min(NB - 1, (tr.spd[k] / (1.6 * f.uInf) * NB) | 0)].push(k);
+    ctx.globalAlpha = 0.95;
+    for (var bk = 0; bk < NB; bk++) {
+      ctx.fillStyle = bucketRGB[bk];
+      for (var m = 0; m < buck[bk].length; m++) {
+        var p = tr.path(buck[bk][m]);
+        if (p.len < 1) continue;
+        var o = (p.len - 1) * 3;
+        ctx.fillRect(PX(p.pts[o]) - 1.2, PY(p.pts[o + 1]) - 1.2, 2.4, 2.4);
+      }
+    }
+    ctx.globalAlpha = 1;
   }
 
   function drawMarks() {
     ctx.save();
-    ctx.strokeStyle = 'rgba(201,214,240,.42)';
+    ctx.strokeStyle = 'rgba(201,214,240,.35)';
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
-    ctx.moveTo(PX(M.probe_x), 0); ctx.lineTo(PX(M.probe_x), H);
+    ctx.moveTo(PX(probeCol), 0); ctx.lineTo(PX(probeCol), H);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = 'rgba(201,214,240,.75)';
+    ctx.fillStyle = 'rgba(201,214,240,.7)';
     ctx.font = '11px "Segoe UI",sans-serif';
-    ctx.fillText('尾流探针 x=' + M.probe_x, PX(M.probe_x) + 4, 14);
-    ctx.fillText('入流 u∞=' + M.u_inf, 8, H - 8);
-    ctx.fillText('出流', W - 34, H - 8);
+    ctx.fillText('尾流探针', PX(probeCol) + 4, 13);
+    ctx.fillText('入流 u∞=' + P.uInf.toFixed(2), 8, H - 8);
+    ctx.fillText('出流', W - 30, H - 8);
     ctx.restore();
   }
 
-  // --------------------------------------------------------------- 轨迹层
-  const BANDS = [[0.8, 1, 0.95], [0.5, 0.8, 0.4], [0, 0.5, 0.09]];
-  function drawTrails(T, frac, alpha) {
-    ctx.lineWidth = 1.15;
-    ctx.lineJoin = 'round';
-    for (const [lo, hi, a] of BANDS) {
-      const start = Math.max(frac, lo), end = Math.min(1, hi);
-      if (start >= end) continue;
-      for (let b = 0; b < NB; b++) {
-        ctx.strokeStyle = bucketRGB[b];
-        ctx.globalAlpha = alpha * a;
-        ctx.beginPath();
-        for (const s of buckets[b]) {
-          const upto = Math.min(s.len, T - s.t0 + 1);
-          if (upto < 2) continue;
-          const j0 = Math.floor((upto - 1) * start), j1 = Math.floor((upto - 1) * end);
-          if (j1 <= j0) continue;
-          ctx.moveTo(PX(s.x[j0]), PY(s.y[j0]));
-          for (let j = j0 + 1; j <= j1; j++) ctx.lineTo(PX(s.x[j]), PY(s.y[j]));
-        }
-        ctx.stroke();
-      }
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  function drawHeads(T, alpha) {
-    for (let b = 0; b < NB; b++) {
-      ctx.fillStyle = bucketRGB[b];
-      ctx.globalAlpha = alpha;
-      for (const s of buckets[b]) {
-        const upto = Math.min(s.len, T - s.t0 + 1);
-        if (upto < 1 || upto > s.len) continue;
-        const j = upto - 1;
-        ctx.fillRect(PX(s.x[j]) - 1.3, PY(s.y[j]) - 1.3, 2.6, 2.6);
-      }
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  // ----------------------------------------------------------------- 播放
-  const T_MAX = M.ticks - 1;
-  let T = 0, playing = true, acc = 0, last = performance.now();
-  const el = id => document.getElementById(id);
-  const scrub = el('scrub'), trail = el('trail'), fieldSel = el('field');
-  scrub.max = T_MAX;
-
-  function render() {
+  function draw() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#0b1020';
     ctx.fillRect(0, 0, W, H);
-    if (fieldSel.value === 'omega') drawField(Math.floor(T * M.record_every / M.frame_every));
-    const len = +trail.value / 100;
-    if (el('showTrails').checked) drawTrails(T, 1 - len, len >= 1 ? 0.9 : 1);
-    if (el('showHeads').checked) drawHeads(T, 0.95);
-    drawObstacle();
-    if (el('showMarks').checked) drawMarks();
-    el('tlabel').textContent = T + ' / ' + T_MAX + '  (t=' + (T * M.record_every * M.dt).toFixed(0) + ')';
-    scrub.value = T;
-    el('lenlab').textContent = len >= 1 ? '完整路径' : Math.round(len * 100) + '%';
-  }
-
-  function frame(now) {
-    const dtms = now - last; last = now;
-    if (playing) {
-      acc += dtms / 1000 * (+el('rate').value) * 12;   // 基准 12 个记录时刻/秒
-      while (acc >= 1) { acc -= 1; T = T >= T_MAX ? 0 : T + 1; }
+    if (P.view !== 'none') {
+      paintField();
+      ctx.save();
+      ctx.setTransform(1, 0, 0, -1, 0, H);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(off, 0, 0, W, H);
+      ctx.restore();
     }
-    render();
-    requestAnimationFrame(frame);
+    if (el('showTrails').checked) drawTrails();
+    if (el('showHeads').checked) drawHeads();
+    drawShapes();
+    if (el('showMarks').checked) drawMarks();
   }
 
-  el('play').onclick = () => { playing = !playing; el('play').textContent = playing ? '暂停' : '播放'; };
-  el('reset').onclick = () => { T = 0; acc = 0; };
-  scrub.oninput = e => { T = +e.target.value; playing = false; el('play').textContent = '播放'; };
-  el('png').onclick = () => {
-    const a = document.createElement('a');
-    a.download = '绕流轨迹_Re' + M.re + '_' + M.obstacle.shape + '_tick' + T + '.png';
+  // ------------------------------------------------------------------ 迭代
+  var last = performance.now();
+  function loop(now) {
+    var dtms = Math.min(100, now - last);
+    last = now;
+    if (dtms > 0) fps = fps * 0.9 + (1000 / dtms) * 0.1;
+    if (P.running) {
+      for (var s = 0; s < P.spf; s++) {
+        var t0 = performance.now();
+        try {
+          f.step();
+          tr.step();
+        } catch (e) {
+          P.running = false;
+          el('play').textContent = '播放';
+          showErr(e.message);
+          break;
+        }
+        var dms = performance.now() - t0;
+        emaMs = emaMs * 0.85 + dms * 0.15;
+        steps++;
+        if (steps % 4 === 0) {
+          probe.push(f.v[probeRow * NX + probeCol]);
+          if (probe.length > 240) probe.shift();
+        }
+        if (steps % 20 === 0) scanPeak();
+      }
+    }
+    draw();
+    if (now - hudAt > 220) { hudAt = now; hud(); }
+    requestAnimationFrame(loop);
+  }
+  var hudAt = 0;
+
+  function scanPeak() {
+    var m = 0;
+    for (var k = 0; k < f.u.length; k += 3) {
+      var s = Math.hypot(f.u[k], f.v[k]);
+      if (s > m) m = s;
+    }
+    peakU = Math.max(peakU, m);
+    var w = f.vorticity(), pw = 0;
+    for (var k2 = 0; k2 < w.length; k2 += 5) { var a = Math.abs(w[k2]); if (a > pw) pw = a; }
+    wScale = wScale * 0.9 + Math.max(1e-5, pw) * 0.1;
+  }
+
+  function showErr(msg) {
+    var d = document.createElement('div');
+    d.className = 'err';
+    d.textContent = msg;
+    el('stage').appendChild(d);
+    setTimeout(function () { d.remove(); }, 6000);
+  }
+
+  // ------------------------------------------------------------------ 诊断
+  function probeStats() {
+    var n = probe.length;
+    if (n < 8) return { sd: 0, st: 0 };
+    var mean = 0, i;
+    for (i = 0; i < n; i++) mean += probe[i];
+    mean /= n;
+    var sd = 0;
+    for (i = 0; i < n; i++) sd += (probe[i] - mean) * (probe[i] - mean);
+    sd = Math.sqrt(sd / n);
+    var st = sd > 0.04 * P.uInf ? FS.strouhal(probe, 4 * P.dt, charD(), P.uInf) : 0;
+    return { sd: sd, st: st };
+  }
+
+  function hud() {
+    if (!f) return;
+    var st = probeStats();
+    var transit = NX / Math.max(0.05, P.uInf * P.dt);
+    var state;
+    if (steps < 2.2 * transit) state = '尾流还没定型：再跑约 ' + Math.round(2.2 * transit - steps) + ' 步（把"每帧步数"调到 8× 可以加速）';
+    else if (st.sd < 0.04 * P.uInf) state = '近定常：尾流稳定，没有明显涡脱落（低 Re 或物体太钝）';
+    else if (st.st > 0) state = '周期性涡脱落，St = ' + st.st.toFixed(3);
+    else state = '探针在振荡，但样本还不够一个完整周期';
+    var rows = [
+      ['物理时间 t', f.time.toFixed(0) + ' （' + (steps / Math.max(1, transit)).toFixed(1) + ' 个穿越时间）'],
+      ['单步耗时 / 帧率', emaMs.toFixed(1) + ' ms / ' + fps.toFixed(0) + ' fps'],
+      ['散度 RMS 投影前', f.divBefore.toExponential(2)],
+      ['散度 RMS 投影后', f.divAfter.toExponential(2)],
+      ['|u|max / u∞', (peakU / Math.max(1e-9, P.uInf)).toFixed(2)],
+      ['探针波动 σ', st.sd.toFixed(3)],
+      ['St（过零测得）', st.st > 0 ? st.st.toFixed(3) : '—'],
+      ['固体格数 / 粒子', countSolid() + ' / ' + tr.n]
+    ];
+    el('stats').innerHTML = rows.map(function (r) {
+      return '<tr><td class="k">' + r[0] + '</td><td class="v">' + r[1] + '</td></tr>';
+    }).join('');
+    el('state').textContent = state;
+  }
+
+  function countSolid() {
+    var c = 0;
+    for (var k = 0; k < f.solid.length; k++) c += f.solid[k];
+    return c;
+  }
+
+  // ------------------------------------------------------------------ 交互
+  function toCell(ev) {
+    var r = cv.getBoundingClientRect();
+    return { x: (ev.clientX - r.left) / r.width * NX,
+             y: (1 - (ev.clientY - r.top) / r.height) * NY };
+  }
+  function inside(s, x, y) {
+    var dx = x - s.cx, dy = y - s.cy;
+    if (s.shape === 'square') return Math.abs(dx) <= s.size && Math.abs(dy) <= s.size;
+    if (s.shape === 'ellipse') {
+      var th = s.angle * Math.PI / 180, c = Math.cos(th), sn = Math.sin(th);
+      var xi = c * dx + sn * dy, eta = -sn * dx + c * dy;
+      var a = s.size, b2 = s.size * s.ratio;
+      return (xi * xi) / (a * a) + (eta * eta) / (b2 * b2) <= 1;
+    }
+    return dx * dx + dy * dy <= s.size * s.size;
+  }
+  function edgeDist(s, x, y) {
+    var dx = x - s.cx, dy = y - s.cy;
+    if (s.shape === 'square') return Math.abs(Math.max(Math.abs(dx), Math.abs(dy)) - s.size);
+    return Math.abs(Math.hypot(dx, dy) - s.size);
+  }
+
+  var drag = null;
+  function capture(ev) {
+    try { cv.setPointerCapture(ev.pointerId); } catch (e) { /* 合成事件没有活动指针 */ }
+  }
+  cv.addEventListener('pointerdown', function (ev) {
+    var p = toCell(ev), a = cs();
+    if (P.sel >= 0 && P.sel < a.length &&
+        edgeDist(a[P.sel], p.x, p.y) < Math.max(1.2, a[P.sel].size * 0.22)) {
+      drag = { mode: 'size', i: P.sel };
+      capture(ev);
+      ev.preventDefault();
+      return;
+    }
+    var hit = -1;
+    for (var i = a.length - 1; i >= 0; i--) if (inside(a[i], p.x, p.y)) { hit = i; break; }
+    if (hit >= 0) {
+      P.sel = hit;
+      drag = { mode: 'move', i: hit, ox: p.x - a[hit].cx, oy: p.y - a[hit].cy };
+      capture(ev);
+    } else {
+      P.sel = -1;
+    }
+    syncAll();
+    ev.preventDefault();
+  });
+
+  cv.addEventListener('pointermove', function (ev) {
+    if (!drag) return;
+    var p = toCell(ev), s = P.shapes[drag.i], a = cs(), c = a[drag.i];
+    if (drag.mode === 'move') {
+      var cx = Math.max(c.size * 0.5, Math.min(NX - 1 - c.size * 0.5, p.x - drag.ox));
+      var cy = Math.max(c.size * 0.5, Math.min(NY - 1 - c.size * 0.5, p.y - drag.oy));
+      s.fx = cx / NX; s.fy = cy / NY;
+    } else {
+      var d = Math.hypot(p.x - c.cx, p.y - c.cy) / NX;
+      s.fs = Math.max(2 / NX, Math.min(0.22, d));
+    }
+    pushParams();
+    updateProbe();
+    syncAll();
+  });
+
+  cv.addEventListener('pointerup', function () { drag = null; });
+  cv.addEventListener('pointercancel', function () { drag = null; });
+
+  cv.addEventListener('wheel', function (ev) {
+    if (P.sel < 0) return;
+    ev.preventDefault();
+    var s = P.shapes[P.sel];
+    s.fs = Math.max(2 / NX, Math.min(0.22, s.fs + (ev.deltaY > 0 ? -0.003 : 0.003)));
+    pushParams(); updateProbe(); syncAll();
+  }, { passive: false });
+
+  cv.addEventListener('dblclick', function (ev) {
+    var p = toCell(ev);
+    P.shapes.push({ shape: P.newShape, fx: p.x / NX, fy: p.y / NY, fs: 0.05, ratio: 0.5, angle: 20 });
+    P.sel = P.shapes.length - 1;
+    pushParams(); updateProbe(); syncAll();
+  });
+
+  addEventListener('keydown', function (ev) {
+    var tag = (ev.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (ev.code === 'Space') { ev.preventDefault(); el('play').click(); }
+    else if (ev.code === 'Delete' || ev.code === 'Backspace') { delShape(); }
+    else if (ev.code === 'ArrowRight') { single(); }
+  });
+
+  function delShape() {
+    if (P.sel < 0 || P.sel >= P.shapes.length) return;
+    P.shapes.splice(P.sel, 1);
+    if (P.sel >= P.shapes.length) P.sel = P.shapes.length - 1;
+    pushParams(); updateProbe(); syncAll();
+  }
+
+  function single() {
+    try { f.step(); tr.step(); steps++; } catch (e) { showErr(e.message); }
+    draw(); hud();
+  }
+
+  // ------------------------------------------------------------------ UI 同步
+  function syncAll() {
+    if (!f) return;
+    el('objs').innerHTML = P.shapes.map(function (s, i) {
+      return '<button class="chip' + (i === P.sel ? ' on' : '') + '" data-i="' + i + '">' +
+        NAME[s.shape] + (i + 1) + ' · ' + Math.round(s.fs * NX) + '格</button>';
+    }).join('') || '<span class="hint">还没有障碍物：双击画布添加</span>';
+    var s = P.shapes[P.sel];
+    el('size').disabled = el('ratio').disabled = el('angle').disabled = el('del').disabled = !s;
+    el('ellipseOnly').style.display = s && s.shape === 'ellipse' ? '' : 'none';
+    if (s) {
+      el('size').max = Math.round(0.22 * NX);
+      el('size').value = Math.min(+el('size').max, s.fs * NX);
+      el('lvSize').textContent = (s.fs * NX).toFixed(1) + ' 格（D=' + (2 * s.fs * NX).toFixed(1) + '）';
+      el('ratio').value = s.ratio;
+      el('lvRatio').textContent = s.ratio.toFixed(2);
+      el('angle').value = s.angle;
+      el('lvAngle').textContent = s.angle + '°';
+    } else {
+      el('lvSize').textContent = '—';
+    }
+    el('lvRe').textContent = Math.round(P.re);
+    el('lvU').textContent = P.uInf.toFixed(2);
+    el('lvDt').textContent = P.dt.toFixed(2) + '（CFL ' + (P.uInf * P.dt).toFixed(2) + '）';
+    el('lvIt').textContent = P.iters;
+    el('lvVcg').textContent = P.vcg.toFixed(2);
+    el('lvN').textContent = P.tracers;
+    el('lvTrail').textContent = P.trail >= 100 ? '完整路径' : P.trail + '%';
+    el('derive').textContent = 'ν = u∞D/Re = ' + (P.uInf * charD() / Math.max(1, P.re)).toFixed(4) +
+      '，D = ' + charD().toFixed(1) + ' 格，网格 ' + NX + '×' + NY +
+      (P.uInf * P.dt > 1 ? '。CFL > 1：半拉格朗日仍稳定，但数值粘性更大。' : '');
+    el('cmd').value = pyCommand();
+    el('add').textContent = '添加' + NAME[P.newShape];
+  }
+
+  function pyCommand() {
+    var i = P.sel >= 0 && P.sel < P.shapes.length ? P.sel : 0;
+    var s = P.shapes[i];
+    if (!s) return 'py fluid/run_sim.py';
+    var cx = Math.round(s.fx * NX), cy = Math.round(s.fy * NY);
+    var parts = ['py fluid/run_sim.py',
+      '--shape ' + s.shape,
+      '--size ' + (s.fs * NX).toFixed(1),
+      '--x-pos ' + (cx / NX).toFixed(3),
+      '--y-pos ' + (cy / NY).toFixed(3)];
+    if (s.shape === 'ellipse') parts.push('--ratio ' + s.ratio.toFixed(2), '--angle ' + Math.round(s.angle));
+    parts.push('--nx ' + NX, '--ny ' + NY, '--re ' + Math.round(P.re), '--u ' + P.uInf.toFixed(2),
+      '--dt ' + P.dt.toFixed(2), '--iters ' + P.iters, '--vcg ' + P.vcg.toFixed(2));
+    return parts.join(' ');
+  }
+
+  // ------------------------------------------------------------------ 控件
+  el('play').onclick = function () {
+    P.running = !P.running;
+    this.textContent = P.running ? '暂停' : '播放';
+  };
+  el('step1').onclick = single;
+  el('clear').onclick = function () {
+    f.reinitialize();
+    tr = new FS.Tracers(f, P.tracers, TRAIL_PTS);
+    probe = []; steps = 0; peakU = P.uInf; wScale = 0.08;
+    draw(); hud();
+  };
+  el('spf').onchange = function () { P.spf = +this.value; };
+  el('grid').onchange = function () { P.grid = this.value; P.iters = GRID[P.grid].iters; build(); syncSliders(); };
+  el('newshape').onchange = function () { P.newShape = this.value; el('add').textContent = '添加' + NAME[this.value]; };
+  el('add').onclick = function () {
+    P.shapes.push({ shape: P.newShape, fx: 0.6, fy: 0.5, fs: 0.05, ratio: 0.5, angle: 20 });
+    P.sel = P.shapes.length - 1;
+    pushParams(); updateProbe(); syncAll();
+  };
+  el('del').onclick = delShape;
+  el('objs').onclick = function (ev) {
+    var b = ev.target.closest('button[data-i]');
+    if (!b) return;
+    P.sel = +b.getAttribute('data-i');
+    syncAll();
+  };
+  el('size').oninput = function () {
+    var s = P.shapes[P.sel];
+    if (!s) return;
+    s.fs = +this.value / NX;
+    pushParams(); updateProbe(); syncAll();
+  };
+  el('ratio').oninput = function () {
+    var s = P.shapes[P.sel];
+    if (!s) return;
+    s.ratio = +this.value;
+    pushParams(); syncAll();
+  };
+  el('angle').oninput = function () {
+    var s = P.shapes[P.sel];
+    if (!s) return;
+    s.angle = +this.value;
+    pushParams(); syncAll();
+  };
+  el('re').oninput = function () {
+    P.re = Math.round(20 * Math.pow(100, +this.value / 100));   // Re 20 … 2000，对数滑动
+    pushParams(); syncAll();
+  };
+  el('u').oninput = function () { P.uInf = +this.value; pushParams(); syncAll(); };
+  el('dt').oninput = function () { P.dt = +this.value; pushParams(); syncAll(); };
+  el('iters').oninput = function () { P.iters = +this.value; pushParams(); syncAll(); };
+  el('vcg').oninput = function () { P.vcg = +this.value; pushParams(); syncAll(); };
+  el('view').onchange = function () { P.view = this.value; };
+  el('tracers').oninput = function () {
+    P.tracers = +this.value;
+    tr = new FS.Tracers(f, P.tracers, TRAIL_PTS);
+    syncAll();
+  };
+  el('trail').oninput = function () { P.trail = +this.value; syncAll(); };
+  el('png').onclick = function () {
+    var a = document.createElement('a');
+    a.download = '绕流_Re' + Math.round(P.re) + '_' + (P.shapes[0] ? P.shapes[0].shape : 'empty') + '.png';
     a.href = cv.toDataURL('image/png');
     a.click();
   };
-  addEventListener('keydown', e => {
-    if (e.code === 'Space') { e.preventDefault(); el('play').click(); }
-    else if (e.code === 'ArrowLeft') { T = Math.max(0, T - 1); }
-    else if (e.code === 'ArrowRight') { T = Math.min(T_MAX, T + 1); }
+  el('share').onclick = function () {
+    var o = { g: P.grid, re: Math.round(P.re), u: +P.uInf.toFixed(2), dt: +P.dt.toFixed(2),
+      it: P.iters, vc: +P.vcg.toFixed(2), v: P.view, s: P.shapes.map(function (s) {
+        return [s.shape, +s.fx.toFixed(4), +s.fy.toFixed(4), +s.fs.toFixed(4),
+                +s.ratio.toFixed(2), Math.round(s.angle)];
+      }) };
+    location.hash = encodeURIComponent(JSON.stringify(o));
+    copy(location.href, this);
+  };
+  el('copycmd').onclick = function () { copy(el('cmd').value, this); };
+
+  function copy(text, btn) {
+    var done = function () { var t = btn.textContent; btn.textContent = '已复制'; setTimeout(function () { btn.textContent = t; }, 1200); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text); done(); });
+    } else { fallbackCopy(text); done(); }
+  }
+  function fallbackCopy(text) {
+    var t = document.createElement('textarea');
+    t.value = text;
+    document.body.appendChild(t);
+    t.select();
+    try { document.execCommand('copy'); } catch (e) { /* 用户手动复制 */ }
+    t.remove();
+  }
+
+  var CASES = {
+    street: function () {
+      P.shapes = [{ shape: 'circle', fx: 0.18, fy: 0.5, fs: 0.0625, ratio: 1, angle: 0 }];
+      P.re = 300; P.grid = 'mid'; P.iters = 40; P.vcg = 0.08; P.uInf = 1; P.dt = 1; P.view = 'omega';
+    },
+    square: function () {
+      P.shapes = [{ shape: 'square', fx: 0.18, fy: 0.5, fs: 0.055, ratio: 1, angle: 0 }];
+      P.re = 150; P.grid = 'mid'; P.iters = 40; P.vcg = 0.06; P.uInf = 1; P.dt = 1; P.view = 'omega';
+    },
+    foil: function () {
+      P.shapes = [{ shape: 'ellipse', fx: 0.2, fy: 0.5, fs: 0.09, ratio: 0.22, angle: 18 }];
+      P.re = 400; P.grid = 'mid'; P.iters = 40; P.vcg = 0.1; P.uInf = 1; P.dt = 1; P.view = 'omega';
+    },
+    two: function () {
+      P.shapes = [{ shape: 'circle', fx: 0.2, fy: 0.36, fs: 0.055, ratio: 1, angle: 0 },
+                  { shape: 'circle', fx: 0.2, fy: 0.64, fs: 0.055, ratio: 1, angle: 0 }];
+      P.re = 250; P.grid = 'mid'; P.iters = 40; P.vcg = 0.08; P.uInf = 1; P.dt = 1; P.view = 'omega';
+    },
+    low: function () {
+      P.shapes = [{ shape: 'circle', fx: 0.24, fy: 0.5, fs: 0.07, ratio: 1, angle: 0 }];
+      P.re = 40; P.grid = 'mid'; P.iters = 40; P.vcg = 0.02; P.uInf = 1; P.dt = 1; P.view = 'omega';
+    }
+  };
+  Array.prototype.forEach.call(document.querySelectorAll('button[data-case]'), function (b) {
+    b.onclick = function () {
+      CASES[b.getAttribute('data-case')]();
+      P.sel = 0;
+      build(); syncSliders(); syncAll();
+    };
   });
 
-  // ------------------------------------------------------------------ 指标
-  const f2 = (v, n) => Number(v).toFixed(n);
-  const rows = [
-    ['网格', NX + ' × ' + NY],
-    ['物体', M.obstacle.shape + '  D=' + f2(M.D, 0) + ' 格'],
-    ['Re', f2(M.re, 0)],
-    ['nu', M.nu.toExponential(2)],
-    ['CFL', f2(M.cfl, 2)],
-    ['dt / 压力迭代', f2(M.dt, 1) + ' / ' + M.iters],
-    ['涡度约束 eps', f2(M.vcg, 2)],
-    ['St（过零测得）', f2(M.strouhal, 3)],
-    ['记录时刻', M.ticks + '（约 ' + f2(M.periods, 1) + ' 个周期）'],
-    ['轨迹段数', segs.length],
-    ['散度 RMS 投影前', M.div_rms[0].toExponential(2)],
-    ['散度 RMS 投影后', M.div_rms[1].toExponential(2)]
-  ];
-  el('stats').innerHTML = rows.map(r => '<tr><td class="k">' + r[0] + '</td><td class="v">' + r[1] + '</td></tr>').join('');
-  el('obar').style.background = 'linear-gradient(90deg,rgb(255,104,66),rgb(11,16,32),rgb(86,200,255))';
-  el('olabel').textContent = '涡度色标 −ωmax … 0 … +ωmax，ωmax=' + M.wmax.toExponential(2) + '（第 99.5 百分位，超出部分削顶）';
-  el('sbar').style.background = 'linear-gradient(90deg,' +
-    Array.from({ length: 12 }, (_, i) =>
-      'rgb(' + speedRGB(i / 11).map(v => v | 0).join(',') + ') ' + Math.round(i / 11 * 100) + '%').join(',') + ')';
-  el('slabel').textContent = '0 → ' + f2(SPEED_MAX, 2) + ' u∞，更慢偏紫红、更快偏白';
+  function syncSliders() {
+    el('grid').value = P.grid;
+    el('re').value = Math.max(0, Math.min(100, Math.log(P.re / 20) / Math.log(100) * 100));
+    el('u').value = P.uInf;
+    el('dt').value = P.dt;
+    el('iters').value = P.iters;
+    el('vcg').value = P.vcg;
+    el('view').value = P.view;
+    el('tracers').value = P.tracers;
+    el('trail').value = P.trail;
+  }
 
-  requestAnimationFrame(frame);
+  // ------------------------------------------------------------------ 启动
+  function fromHash() {
+    if (!location.hash || location.hash.length < 3) return false;
+    try {
+      var o = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+      if (!o || !o.s || !o.s.length) return false;
+      P.grid = GRID[o.g] ? o.g : 'mid';
+      P.re = +o.re || 300; P.uInf = +o.u || 1; P.dt = +o.dt || 1;
+      P.iters = +o.it || GRID[P.grid].iters; P.vcg = isFinite(o.vc) ? +o.vc : 0.08;
+      P.view = o.v || 'speed';
+      P.shapes = o.s.map(function (a) {
+        return { shape: NAME[a[0]] ? a[0] : 'circle', fx: +a[1], fy: +a[2], fs: +a[3],
+                 ratio: +a[4] || 1, angle: +a[5] || 0 };
+      });
+      P.sel = 0;
+      return true;
+    } catch (e) { return false; }
+  }
+
+  if (!FS) {
+    el('stage').innerHTML = '<div class="err">没有加载到 <code>fluid-sim.js</code>，' +
+      '请确认它和本页在同一目录。</div>';
+    return;
+  }
+  fromHash();
+  build();
+  syncSliders();
+  syncAll();
+  requestAnimationFrame(loop);
 })();
 </script>
 </body>

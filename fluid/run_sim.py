@@ -1,4 +1,4 @@
-"""运行绕流模拟，把示踪粒子轨迹与涡度场导出给 web/index.html 播放。
+"""运行绕流模拟，把示踪粒子轨迹与涡度场导出给 web/replay.html 播放。
 
     py fluid/run_sim.py                          # 默认圆柱 Re=300
     py fluid/run_sim.py --shape square --re 120
@@ -92,8 +92,10 @@ def parse_args():
                    help="涡度约束强度 eps，含义是每步速度增量上限占 u_inf 的比例，建议 0~0.3")
     w.add_argument("--settle-transits", type=float, default=2.5, help="稳态等待几个穿越时间")
     w.add_argument("--periods", type=float, default=4.0, help="记录几个涡脱周期")
-    w.add_argument("--record-every", type=int, default=4, help="每隔几步存一个轨迹点")
-    w.add_argument("--frame-every", type=int, default=12, help="每隔几步存一张涡度场")
+    w.add_argument("--record-every", type=int, default=2,
+                   help="每隔几步存一个轨迹点；取 2 时播放器能插值到 60 fps，取 4 更省体积")
+    w.add_argument("--frame-every", type=int, default=6,
+                   help="每隔几步存一张涡度场；默认与 record-every 配合成 3 tick 一帧，播放时叠化")
     w.add_argument("--sub", type=int, default=4, help="涡度场导出降采样倍数")
     w.add_argument("--tracers", type=int, default=170)
     w.add_argument("--seed", type=int, default=7)
