@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>绕流轨迹可视化 · 不可压缩 Navier-Stokes 投影法</title>
+<style>
+  :root { --bg:#0b1020; --panel:#131a2e; --line:#26314f; --fg:#dfe6f5; --dim:#8fa0c4; --acc:#5ec8ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
+  header { padding:18px 22px 12px; border-bottom:1px solid var(--line); }
+  h1 { margin:0 0 6px; font-size:19px; font-weight:600; }
+  .sub { color:var(--dim); font-size:12.5px; }
+  .wrap { display:flex; gap:18px; padding:18px 22px 28px; align-items:flex-start;
+          flex-wrap:wrap; }
+  #stage { flex:1 1 0; min-width:0; }
+  canvas { background:var(--bg); border:1px solid var(--line); border-radius:6px;
+           width:100%; height:auto; display:block; }
+  aside { width:300px; flex:0 0 300px; display:flex; flex-direction:column; gap:14px; }
+  @media (max-width:760px) {
+    #stage, aside { flex:1 1 100%; width:100%; }
+  }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px 14px; }
+  .card h2 { margin:0 0 10px; font-size:13px; letter-spacing:.06em; color:var(--dim);
+             font-weight:600; text-transform:uppercase; }
+  label { display:block; font-size:12.5px; color:var(--dim); margin:9px 0 3px; }
+  .row { display:flex; gap:8px; align-items:center; }
+  input[type=range] { width:100%; }
+  select, button { background:#1b2440; color:var(--fg); border:1px solid var(--line);
+                   border-radius:4px; padding:6px 10px; font-size:13px; font-family:inherit; }
+  button:hover { border-color:var(--acc); cursor:pointer; }
+  button.pri { background:#1d4a6b; border-color:#2f6f9c; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  td { padding:2.5px 0; }
+  td.k { color:var(--dim); }
+  td.v { text-align:right; font-variant-numeric:tabular-nums; }
+  .bar { height:10px; border-radius:3px; margin-top:6px; }
+  .hint { font-size:12px; color:var(--dim); }
+  .warn { background:#3a1d22; border:1px solid #6d2b34; padding:14px; border-radius:6px; }
+  code { background:#0d1526; padding:1px 5px; border-radius:3px; font-size:12px; }
+  kbd { background:#0d1526; border:1px solid var(--line); border-radius:3px; padding:0 5px; font-size:11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>物体绕流的流动轨迹可视化</h1>
+  <div class="sub">numpy 求解不可压缩 Navier-Stokes（半拉格朗日平流 + 压力投影 + 浸没固体），
+    浏览器只负责播放 Python 算出的示踪粒子轨迹与涡度场</div>
+</header>
+
+<div class="wrap">
+  <div id="stage"><canvas id="cv"></canvas></div>
+  <aside>
+    <div class="card">
+      <h2>播放</h2>
+      <div class="row">
+        <button id="play" class="pri">暂停</button>
+        <button id="reset">回到开头</button>
+      </div>
+      <label>记录时刻 <span id="tlabel"></span></label>
+      <input type="range" id="scrub" min="0" max="1" value="0" step="1">
+      <label>播放速度</label>
+      <select id="rate">
+        <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option><option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+      <label>拖尾长度 <span id="lenlab"></span></label>
+      <input type="range" id="trail" min="10" max="100" value="45" step="5">
+      <label>背景场</label>
+      <select id="field">
+        <option value="omega" selected>涡度 ω（蓝正红负）</option>
+        <option value="none">不画背景</option>
+      </select>
+      <div class="row" style="margin-top:8px">
+        <label style="margin:0"><input type="checkbox" id="showTrails" checked> 轨迹</label>
+        <label style="margin:0"><input type="checkbox" id="showHeads" checked> 粒子</label>
+        <label style="margin:0"><input type="checkbox" id="showMarks" checked> 标注</label>
+      </div>
+      <label>轨迹着色 = 局部速度</label>
+      <div class="bar" id="sbar"></div>
+      <div class="hint" id="slabel"></div>
+      <div class="hint" style="margin-top:10px"><kbd>空格</kbd> 播放/暂停 · <kbd>←</kbd><kbd>→</kbd> 单步</div>
+    </div>
+
+    <div class="card">
+      <h2>本次模拟</h2>
+      <table id="stats"></table>
+      <div class="bar" id="obar"></div>
+      <div class="hint" id="olabel"></div>
+    </div>
+
+    <div class="card">
+      <h2>出图</h2>
+      <button id="png" class="pri" style="width:100%">导出当前画面 PNG</button>
+      <div class="hint" style="margin-top:8px">导出的图可直接插入报告；换一帧再导即可得到不同时刻的对比图。</div>
+    </div>
+  </aside>
+</div>
+
+<script src="flow_data.js"></script>
+<script>
+(function () {
+  const D = window.FLOW_DATA;
+  const stage = document.getElementById('stage');
+  if (!D || !D.meta) {
+    stage.innerHTML = '<div class="warn">没有读到 <code>web/flow_data.js</code>。<br>' +
+      '先在仓库根目录运行：<br><code>py fluid/run_sim.py</code><br>' +
+      '生成数据后刷新本页即可。</div>';
+    return;
+  }
+  const M = D.meta, CS = 5, NX = M.nx, NY = M.ny, Q = 32767;
+  const W = NX * CS, H = NY * CS;
+  const cv = document.getElementById('cv');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+
+  const PX = x => (x + 0.5) * CS;
+  const PY = y => (NY - 1 - y + 0.5) * CS;   // y 轴向上，与右手系一致
+
+  function int16(b64) {
+    const bin = atob(b64), n = bin.length, by = new Uint8Array(n);
+    for (let i = 0; i < n; i++) by[i] = bin.charCodeAt(i);
+    return new Int16Array(by.buffer);
+  }
+  const norm = q => (q / Q + 1) * 0.5;
+
+  // ---------------------------------------------------------------- 轨迹解码
+  const R = M.path_ranges, ML = M.path_max;
+  const pq = int16(D.paths);
+  const segs = D.lens.map((len, k) => {
+    const x = new Float32Array(len), y = new Float32Array(len), s = new Float32Array(len);
+    for (let j = 0; j < len; j++) {
+      const b = (k * ML + j) * 3;
+      x[j] = norm(pq[b]) * R[0][1];
+      y[j] = norm(pq[b + 1]) * R[1][1];
+      s[j] = norm(pq[b + 2]) * R[2][1];
+    }
+    return { x, y, s, len, t0: D.t0[k], mean: s.slice(0, len).reduce((a, c) => a + c, 0) / Math.max(1, len) };
+  });
+
+  // --------------------------------------------------------------- 色标
+  function lerp(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+  const SPEED = [[0, [46, 16, 74]], [0.3, [150, 46, 74]], [0.55, [222, 96, 40]],
+                 [0.75, [248, 168, 30]], [0.9, [250, 224, 90]], [1, [252, 252, 210]]];
+  function speedRGB(t) {
+    t = Math.max(0, Math.min(1, t));
+    for (let i = 1; i < SPEED.length; i++)
+      if (t <= SPEED[i][0]) {
+        const a = SPEED[i - 1], b = SPEED[i];
+        return lerp(a[1], b[1], (t - a[0]) / (b[0] - a[0]));
+      }
+    return SPEED[SPEED.length - 1][1];
+  }
+  const NB = 12, bucketRGB = [];
+  for (let b = 0; b < NB; b++) {
+    const c = speedRGB((b + 0.5) / NB);
+    bucketRGB.push('rgb(' + c.map(v => v | 0).join(',') + ')');
+  }
+
+  // ------------------------------------------------------ 涡度帧解码并预着色
+  const FW = M.frames.w, FH = M.frames.h, SUB = M.frames.sub;
+  const wq = int16(D.frames), NF = wq.length / (FW * FH);
+  const base = [11, 16, 32], pos = [86, 200, 255], neg = [255, 104, 66];
+  const off = document.createElement('canvas');
+  off.width = FW; off.height = FH;
+  const octx = off.getContext('2d');
+  const frameImgs = [];
+  for (let f = 0; f < NF; f++) {
+    const img = octx.createImageData(FW, FH);
+    for (let p = 0; p < FW * FH; p++) {
+      const v = Math.max(-1, Math.min(1, wq[f * FW * FH + p] / Q));
+      const c = v >= 0 ? lerp(base, pos, Math.pow(v, 0.55)) : lerp(base, neg, Math.pow(-v, 0.55));
+      img.data[p * 4] = c[0] | 0; img.data[p * 4 + 1] = c[1] | 0;
+      img.data[p * 4 + 2] = c[2] | 0; img.data[p * 4 + 3] = 255;
+    }
+    frameImgs.push(img);
+  }
+
+  const buckets = Array.from({ length: NB }, () => []);
+  // 轨迹按局部速度着色，色标以 u∞ 为基准(1.6 u∞ 封顶)，否则整幅图都挤在同一色相里
+  const SPEED_MAX = 1.6 * M.u_inf;
+  segs.forEach(s => buckets[Math.min(NB - 1, (s.mean / SPEED_MAX * NB) | 0)].push(s));
+
+  // --------------------------------------------------------------- 静态图层
+  function drawField(k) {
+    octx.putImageData(frameImgs[Math.min(k, NF - 1)], 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, -1, 0, H);          // 垂直翻转，令 +y 朝上
+    ctx.drawImage(off, 0, 0, W, H);
+    ctx.restore();
+  }
+
+  function drawObstacle() {
+    const o = M.obstacle;
+    ctx.save();
+    ctx.translate(PX(o.cx), PY(o.cy));
+    if (o.shape === 'ellipse') ctx.rotate(-o.angle * Math.PI / 180);
+    ctx.beginPath();
+    const r = o.size * CS;
+    if (o.shape === 'circle') ctx.arc(0, 0, r, 0, 6.2832);
+    else if (o.shape === 'square') ctx.rect(-r, -r, 2 * r, 2 * r);
+    else ctx.ellipse(0, 0, r, r * o.ratio, 0, 0, 6.2832);
+    ctx.fillStyle = '#0a0e1a';
+    ctx.fill();
+    ctx.strokeStyle = '#c9d6f0';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawMarks() {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(201,214,240,.42)';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(PX(M.probe_x), 0); ctx.lineTo(PX(M.probe_x), H);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(201,214,240,.75)';
+    ctx.font = '11px "Segoe UI",sans-serif';
+    ctx.fillText('尾流探针 x=' + M.probe_x, PX(M.probe_x) + 4, 14);
+    ctx.fillText('入流 u∞=' + M.u_inf, 8, H - 8);
+    ctx.fillText('出流', W - 34, H - 8);
+    ctx.restore();
+  }
+
+  // --------------------------------------------------------------- 轨迹层
+  const BANDS = [[0.8, 1, 0.95], [0.5, 0.8, 0.4], [0, 0.5, 0.09]];
+  function drawTrails(T, frac, alpha) {
+    ctx.lineWidth = 1.15;
+    ctx.lineJoin = 'round';
+    for (const [lo, hi, a] of BANDS) {
+      const start = Math.max(frac, lo), end = Math.min(1, hi);
+      if (start >= end) continue;
+      for (let b = 0; b < NB; b++) {
+        ctx.strokeStyle = bucketRGB[b];
+        ctx.globalAlpha = alpha * a;
+        ctx.beginPath();
+        for (const s of buckets[b]) {
+          const upto = Math.min(s.len, T - s.t0 + 1);
+          if (upto < 2) continue;
+          const j0 = Math.floor((upto - 1) * start), j1 = Math.floor((upto - 1) * end);
+          if (j1 <= j0) continue;
+          ctx.moveTo(PX(s.x[j0]), PY(s.y[j0]));
+          for (let j = j0 + 1; j <= j1; j++) ctx.lineTo(PX(s.x[j]), PY(s.y[j]));
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawHeads(T, alpha) {
+    for (let b = 0; b < NB; b++) {
+      ctx.fillStyle = bucketRGB[b];
+      ctx.globalAlpha = alpha;
+      for (const s of buckets[b]) {
+        const upto = Math.min(s.len, T - s.t0 + 1);
+        if (upto < 1 || upto > s.len) continue;
+        const j = upto - 1;
+        ctx.fillRect(PX(s.x[j]) - 1.3, PY(s.y[j]) - 1.3, 2.6, 2.6);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ----------------------------------------------------------------- 播放
+  const T_MAX = M.ticks - 1;
+  let T = 0, playing = true, acc = 0, last = performance.now();
+  const el = id => document.getElementById(id);
+  const scrub = el('scrub'), trail = el('trail'), fieldSel = el('field');
+  scrub.max = T_MAX;
+
+  function render() {
+    ctx.fillStyle = '#0b1020';
+    ctx.fillRect(0, 0, W, H);
+    if (fieldSel.value === 'omega') drawField(Math.floor(T * M.record_every / M.frame_every));
+    const len = +trail.value / 100;
+    if (el('showTrails').checked) drawTrails(T, 1 - len, len >= 1 ? 0.9 : 1);
+    if (el('showHeads').checked) drawHeads(T, 0.95);
+    drawObstacle();
+    if (el('showMarks').checked) drawMarks();
+    el('tlabel').textContent = T + ' / ' + T_MAX + '  (t=' + (T * M.record_every * M.dt).toFixed(0) + ')';
+    scrub.value = T;
+    el('lenlab').textContent = len >= 1 ? '完整路径' : Math.round(len * 100) + '%';
+  }
+
+  function frame(now) {
+    const dtms = now - last; last = now;
+    if (playing) {
+      acc += dtms / 1000 * (+el('rate').value) * 12;   // 基准 12 个记录时刻/秒
+      while (acc >= 1) { acc -= 1; T = T >= T_MAX ? 0 : T + 1; }
+    }
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  el('play').onclick = () => { playing = !playing; el('play').textContent = playing ? '暂停' : '播放'; };
+  el('reset').onclick = () => { T = 0; acc = 0; };
+  scrub.oninput = e => { T = +e.target.value; playing = false; el('play').textContent = '播放'; };
+  el('png').onclick = () => {
+    const a = document.createElement('a');
+    a.download = '绕流轨迹_Re' + M.re + '_' + M.obstacle.shape + '_tick' + T + '.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
+  };
+  addEventListener('keydown', e => {
+    if (e.code === 'Space') { e.preventDefault(); el('play').click(); }
+    else if (e.code === 'ArrowLeft') { T = Math.max(0, T - 1); }
+    else if (e.code === 'ArrowRight') { T = Math.min(T_MAX, T + 1); }
+  });
+
+  // ------------------------------------------------------------------ 指标
+  const f2 = (v, n) => Number(v).toFixed(n);
+  const rows = [
+    ['网格', NX + ' × ' + NY],
+    ['物体', M.obstacle.shape + '  D=' + f2(M.D, 0) + ' 格'],
+    ['Re', f2(M.re, 0)],
+    ['nu', M.nu.toExponential(2)],
+    ['CFL', f2(M.cfl, 2)],
+    ['dt / 压力迭代', f2(M.dt, 1) + ' / ' + M.iters],
+    ['涡度约束 eps', f2(M.vcg, 2)],
+    ['St（过零测得）', f2(M.strouhal, 3)],
+    ['记录时刻', M.ticks + '（约 ' + f2(M.periods, 1) + ' 个周期）'],
+    ['轨迹段数', segs.length],
+    ['散度 RMS 投影前', M.div_rms[0].toExponential(2)],
+    ['散度 RMS 投影后', M.div_rms[1].toExponential(2)]
+  ];
+  el('stats').innerHTML = rows.map(r => '<tr><td class="k">' + r[0] + '</td><td class="v">' + r[1] + '</td></tr>').join('');
+  el('obar').style.background = 'linear-gradient(90deg,rgb(255,104,66),rgb(11,16,32),rgb(86,200,255))';
+  el('olabel').textContent = '涡度色标 −ωmax … 0 … +ωmax，ωmax=' + M.wmax.toExponential(2) + '（第 99.5 百分位，超出部分削顶）';
+  el('sbar').style.background = 'linear-gradient(90deg,' +
+    Array.from({ length: 12 }, (_, i) =>
+      'rgb(' + speedRGB(i / 11).map(v => v | 0).join(',') + ') ' + Math.round(i / 11 * 100) + '%').join(',') + ')';
+  el('slabel').textContent = '0 → ' + f2(SPEED_MAX, 2) + ' u∞，更慢偏紫红、更快偏白';
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

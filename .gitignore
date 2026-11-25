@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# run_sim.py 每次重算都会覆盖，且与 web/flow_data.js 内容重复
+data/
